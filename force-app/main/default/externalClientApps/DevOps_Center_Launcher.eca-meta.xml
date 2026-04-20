@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExternalClientApplication xmlns="http://soap.sforce.com/2006/04/metadata">
+    <contactEmail>rodrigo@analytics-march-2026.com</contactEmail>
+    <description>Launcher for the standard DevOps Center app.</description>
+    <distributionState>Local</distributionState>
+    <isProtected>false</isProtected>
+    <label>DevOps Center Launcher</label>
+    <orgScopedExternalApp>00Dd200000enzPt:DevOps_Center_Launcher</orgScopedExternalApp>
+</ExternalClientApplication>

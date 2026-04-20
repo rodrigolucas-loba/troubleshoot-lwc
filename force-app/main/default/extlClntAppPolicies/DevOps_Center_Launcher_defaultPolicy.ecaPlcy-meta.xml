@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtlClntAppConfigurablePolicies xmlns="http://soap.sforce.com/2006/04/metadata">
+    <externalClientApplication>DevOps_Center_Launcher</externalClientApplication>
+    <isEnabled>true</isEnabled>
+    <label>DevOps_Center_Launcher_defaultPolicy</label>
+    <startPage>Custom</startPage>
+    <startUrl>https://loba-b-dev-ed.develop.my.salesforce.com/lightning/app/standard__AlmDevops</startUrl>
+</ExtlClntAppConfigurablePolicies>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Backup_Agent__c</fullName>
+    <description
+  >Used to identify the assigned support rep when case owner is away - for support use only.</description>
+    <inlineHelpText
+  >Who is the assigned support rep when case owner is away?</inlineHelpText>
+    <label>Backup Agent</label>
+    <lookupFilter>
+        <active>true</active>
+        <booleanFilter>1</booleanFilter>
+        <filterItems>
+            <field>User.Profile.Name</field>
+            <operation>equals</operation>
+            <value>Support User</value>
+        </filterItems>
+        <isOptional>true</isOptional>
+    </lookupFilter>
+    <referenceTo>User</referenceTo>
+    <relationshipLabel>Cases</relationshipLabel>
+    <relationshipName>Backup_Agent_Cases</relationshipName>
+    <type>Lookup</type>
+</CustomField>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<LightningMessageChannel xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>BearListUpdate</fullName>
+    <isExposed>true</isExposed>
+    <description
+  >Publishes the selected Bear Id from the list; subscribers (e.g., location/supervisor) react to selection.</description>
+    <masterLabel>Bear List Update</masterLabel>
+</LightningMessageChannel>

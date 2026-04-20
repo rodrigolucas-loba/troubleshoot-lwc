@@ -1,0 +1,233 @@
+{
+  "versionDetail": {
+    "architecture": "win32-x64",
+    "cliVersion": "@salesforce/cli/2.127.2",
+    "nodeVersion": "node-v22.22.0",
+    "osVersion": "Windows_NT 10.0.26200",
+    "rootPath": "C:\\Users\\rodri\\AppData\\Local\\sf\\client\\2.127.2-99c2587",
+    "shell": "powershell",
+    "pluginVersions": [
+      "@oclif/plugin-autocomplete 3.2.40 (core)",
+      "@oclif/plugin-commands 4.1.40 (core)",
+      "@oclif/plugin-help 6.2.37 (core)",
+      "@oclif/plugin-not-found 3.2.74 (core)",
+      "@oclif/plugin-plugins 5.4.58 (core)",
+      "@oclif/plugin-search 1.2.38 (core)",
+      "@oclif/plugin-update 4.7.22 (core)",
+      "@oclif/plugin-version 2.2.37 (core)",
+      "@oclif/plugin-warn-if-update-available 3.1.55 (core)",
+      "@oclif/plugin-which 3.2.44 (core)",
+      "@salesforce/cli 2.127.2 (core)",
+      "agent 1.32.0 (core)",
+      "apex 3.9.12 (core)",
+      "api 1.3.11 (core)",
+      "auth 4.3.0 (core)",
+      "code-analyzer 5.11.0 (user)",
+      "data 4.0.77 (core)",
+      "deploy-retrieve 3.24.15 (core)",
+      "info 3.4.109 (core)",
+      "lightning-dev 5.1.4 (user)",
+      "limits 3.3.79 (core)",
+      "marketplace 1.3.10 (core)",
+      "org 5.9.71 (core)",
+      "packaging 2.25.7 (core)",
+      "schema 3.3.96 (core)",
+      "settings 2.4.60 (core)",
+      "signups 2.6.56 (user)",
+      "sobject 1.4.85 (core)",
+      "telemetry 3.8.2 (core)",
+      "templates 56.10.5 (core)",
+      "trust 3.7.114 (core)",
+      "user 3.6.53 (core)"
+    ]
+  },
+  "sfdxEnvVars": [],
+  "sfEnvVars": [
+    [
+      "SF_AUTOUPDATE_DISABLE",
+      "true"
+    ],
+    [
+      "SF_BINPATH",
+      "C:\\Users\\rodri\\AppData\\Local\\sf\\client\\bin\\sf"
+    ],
+    [
+      "SF_DISABLE_AUTOUPDATE",
+      "true"
+    ],
+    [
+      "SF_UPDATE_INSTRUCTIONS",
+      "Use \"npm update --global @salesforce/cli\" to update npm-based installations."
+    ]
+  ],
+  "proxyEnvVars": [],
+  "cliConfig": {
+    "arch": "x64",
+    "bin": "sf",
+    "binAliases": [
+      "sfdx"
+    ],
+    "binPath": "C:\\Users\\rodri\\AppData\\Local\\sf\\client\\bin\\sf",
+    "cacheDir": "C:\\Users\\rodri\\AppData\\Local\\sf",
+    "channel": "stable",
+    "configDir": "C:\\Users\\rodri\\AppData\\Local\\sf",
+    "dataDir": "C:\\Users\\rodri\\AppData\\Local\\sf",
+    "dirname": "sf",
+    "flexibleTaxonomy": true,
+    "home": "C:\\Users\\rodri",
+    "isSingleCommandCLI": false,
+    "name": "@salesforce/cli",
+    "nsisCustomization": "scripts/nsis.nsi",
+    "platform": "win32",
+    "root": "C:\\Users\\rodri\\AppData\\Local\\sf\\client\\2.127.2-99c2587",
+    "shell": "powershell",
+    "theme": {
+      "bin": "blueBright",
+      "command": "blueBright",
+      "dollarSign": "green",
+      "flag": "green",
+      "flagDefaultValue": "blueBright",
+      "flagOptions": "blueBright",
+      "flagRequired": "red",
+      "sectionHeader": "blue",
+      "topic": "blueBright",
+      "json": {
+        "brace": "whiteBright",
+        "bracket": "whiteBright",
+        "comma": "green",
+        "key": "blueBright",
+        "string": "greenBright",
+        "number": "blue",
+        "boolean": "redBright",
+        "null": "blackBright"
+      }
+    },
+    "topicSeparator": " ",
+    "updateConfig": {
+      "node": {
+        "options": [
+          "--no-deprecation"
+        ]
+      },
+      "s3": {
+        "bucket": "dfc-data-production",
+        "host": "https://developer.salesforce.com",
+        "templates": {
+          "target": {
+            "baseDir": "<%- bin %>",
+            "manifest": "<%- channel === 'stable' ? '' : 'channels/' + channel + '/' %><%- platform %>-<%- arch %>",
+            "unversioned": "<%- channel === 'stable' ? '' : 'channels/' + channel + '/' %><%- bin %>-<%- platform %>-<%- arch %><%- ext %>",
+            "versioned": "<%- channel === 'stable' ? '' : 'channels/' + channel + '/' %><%- bin %>-v<%- version %>/<%- bin %>-v<%- version %>-<%- platform %>-<%- arch %><%- ext %>"
+          },
+          "vanilla": {
+            "baseDir": "<%- bin %>",
+            "manifest": "<%- channel === 'stable' ? '' : 'channels/' + channel + '/' %>version",
+            "unversioned": "<%- channel === 'stable' ? '' : 'channels/' + channel + '/' %><%- bin %><%- ext %>",
+            "versioned": "<%- channel === 'stable' ? '' : 'channels/' + channel + '/' %><%- bin %>-v<%- version %>/<%- bin %>-v<%- version %><%- ext %>"
+          }
+        }
+      }
+    },
+    "userAgent": "@salesforce/cli/2.127.2 win32-x64 node-v22.22.0",
+    "valid": true,
+    "version": "2.127.2",
+    "warned": false,
+    "windows": true,
+    "_base": "@oclif/core@4.8.4",
+    "_commands": {},
+    "_topics": {},
+    "commandPermutations": {
+      "validPermutations": {}
+    },
+    "pluginLoader": {
+      "options": {
+        "plugins": {},
+        "root": "C:\\Users\\rodri\\AppData\\Local\\sf\\client\\2.127.2-99c2587\\dist"
+      },
+      "errors": [],
+      "plugins": {},
+      "pluginsProvided": true
+    },
+    "topicPermutations": {
+      "validPermutations": {}
+    },
+    "nodeEngine": ">=18.6.0"
+  },
+  "pluginSpecificData": {
+    "@salesforce/plugin-deploy-retrieve": [
+      {
+        "sourceApiVersion": "66.0",
+        "targetOrgApiVersion": "66.0"
+      }
+    ],
+    "@salesforce/plugin-auth": [
+      {
+        "isUsingGenericKeychain": true,
+        "sfCryptoV2Support": true,
+        "cryptoVersion": "v1"
+      }
+    ]
+  },
+  "diagnosticResults": [
+    {
+      "testName": "salesforcedx plugin isn’t installed",
+      "status": "pass"
+    },
+    {
+      "testName": "you don't have any linked plugins",
+      "status": "pass"
+    },
+    {
+      "testName": "[@salesforce/plugin-trust] can ping: https://registry.npmjs.org",
+      "status": "pass"
+    },
+    {
+      "testName": "[@salesforce/plugin-trust] can ping: https://registry.yarnpkg.com",
+      "status": "pass"
+    },
+    {
+      "testName": "[@salesforce/plugin-trust] can ping: https://registry.npmjs.org/",
+      "status": "pass"
+    },
+    {
+      "testName": "using latest or latest-rc CLI version",
+      "status": "fail"
+    },
+    {
+      "testName": "[@salesforce/plugin-deploy-retrieve] sourceApiVersion matches apiVersion",
+      "status": "pass"
+    },
+    {
+      "testName": "[@salesforce/plugin-deploy-retrieve] sourceApiVersion matches default target org max apiVersion",
+      "status": "pass"
+    },
+    {
+      "testName": "can access: https://test.salesforce.com",
+      "status": "pass"
+    },
+    {
+      "testName": "can access: https://appexchange.salesforce.com/services/data",
+      "status": "pass"
+    },
+    {
+      "testName": "can access: https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-win32-x64-buildmanifest",
+      "status": "pass"
+    },
+    {
+      "testName": "[@salesforce/plugin-auth] CLI supports v2 crypto",
+      "status": "pass"
+    },
+    {
+      "testName": "[@salesforce/plugin-auth] CLI using stable v1 crypto",
+      "status": "pass"
+    }
+  ],
+  "suggestions": [
+    "Check https://github.com/forcedotcom/cli/issues for CLI issues posted by the community.",
+    "Check http://status.salesforce.com for general Salesforce availability and performance.",
+    "using npm registry https://registry.npmjs.org/ from npm config",
+    "Update your CLI version from: 2.127.2 to the latest version: 2.128.5."
+  ],
+  "logFilePaths": [],
+  "commandExitCode": 0
+}

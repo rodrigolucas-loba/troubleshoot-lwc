@@ -1,4 +1,4 @@
-import { LightningElement } from 'lwc';
+import { LightningElement } from "lwc";
 
 export default class Display extends LightningElement {
   counter = 0;
@@ -6,22 +6,24 @@ export default class Display extends LightningElement {
 
   get options() {
     return [
-        { label: '1', value: 1 },
-        { label: '2', value: 2 },
+      { label: "1", value: "1" },
+      { label: "2", value: "2" }
     ];
   }
-  
+
+  get selectedAugmentor() {
+    return String(this.augmentor);
+  }
+
   handleAugmentorChange(event) {
-    this.augmentor = event.target.value;
+    this.augmentor = Number(event.detail.value);
   }
 
   handleIncrement(event) {
-    const operand = event.detail;
-    this.counter += operand;
+    this.counter += Number(event.detail);
   }
-  
+
   handleDecrement(event) {
-    const operand = event.detail;
-    this.counter -= operand;
+    this.counter -= Number(event.detail);
   }
 }

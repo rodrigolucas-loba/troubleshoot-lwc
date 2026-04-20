@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomObjectTranslation xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fields>
+        <caseValues>
+            <plural>false</plural>
+            <value>Prospect Rating</value>
+        </caseValues>
+        <caseValues>
+            <plural>true</plural>
+            <value>Prospect Ratings</value>
+        </caseValues>
+        <name>account_rating</name>
+        <startsWith>Consonant</startsWith>
+    </fields>
+</CustomObjectTranslation>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>60.0</apiVersion>
+    <label>Add Generator Product to Named Opps</label>
+    <processType>AutoLaunchedFlow</processType>
+    <recordLookups>
+        <name>Get_Pricebook</name>
+        <label>Get Pricebook</label>
+        <locationX>446</locationX>
+        <locationY>134</locationY>
+        <assignNullValuesIfNoRecordsFound>false</assignNullValuesIfNoRecordsFound>
+        <connector>
+            <targetReference>Check_Opp_Name</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>Name</field>
+            <operator>EqualTo</operator>
+            <value><stringValue>Standard Price Book</stringValue></value>
+        </filters>
+        <getFirstRecordOnly>true</getFirstRecordOnly>
+        <object>Pricebook2</object>
+        <storeOutputAutomatically>true</storeOutputAutomatically>
+    </recordLookups>
+    <subflows>
+        <name>Create_1500_Opp_Product</name>
+        <label>Create 1500 Opp Product</label>
+        <locationX>50</locationX>
+        <locationY>350</locationY>
+        <flowName>Subflow_Create_Generator_Opp_Product</flowName>
+        <inputParameters>
+            <name>OpportunityID</name>
+            <value><elementReference>$Record.Id</elementReference></value>
+        </inputParameters>
+        <inputParameters>
+            <name>PricebookID</name>
+            <value><elementReference>Get_Pricebook.Id</elementReference></value>
+        </inputParameters>
+        <inputParameters>
+            <name>ProductKW</name>
+            <value><stringValue>1500</stringValue></value>
+        </inputParameters>
+    </subflows>
+    <decisions>
+        <name>Check_Opp_Name</name>
+        <label>Check Opp Name</label>
+        <locationX>446</locationX>
+        <locationY>242</locationY>
+        <defaultConnectorLabel>None</defaultConnectorLabel>
+        <rules>
+            <name>X1500kW</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.Name</leftValueReference>
+                <operator>Contains</operator>
+                <rightValue><stringValue>1500</stringValue></rightValue>
+            </conditions>
+            <connector><targetReference>Create_1500_Opp_Product</targetReference></connector>
+            <label>1500kW</label>
+        </rules>
+    </decisions>
+    <start>
+        <locationX>320</locationX>
+        <locationY>0</locationY>
+        <connector><targetReference>Get_Pricebook</targetReference></connector>
+        <object>Opportunity</object>
+        <recordTriggerType>Create</recordTriggerType>
+        <triggerType>RecordAfterSave</triggerType>
+    </start>
+    <status>Active</status>
+</Flow>

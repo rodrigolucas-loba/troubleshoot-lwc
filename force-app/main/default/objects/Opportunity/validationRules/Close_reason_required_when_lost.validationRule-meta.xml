@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Close_reason_required_when_lost</fullName>
+    <active>true</active>
+    <description
+  >A close reason is required when opportunity is closed lost.</description>
+    <errorConditionFormula
+  >ISPICKVAL(StageName ,"Closed Lost") &amp;&amp; ISBLANK(Close_Reason__c)</errorConditionFormula>
+    <errorDisplayField>Close_Reason__c</errorDisplayField>
+    <errorMessage
+  >You must enter a close reason when opportunity is closed lost</errorMessage>
+</ValidationRule>

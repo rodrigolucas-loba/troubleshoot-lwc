@@ -1,20 +1,24 @@
 <template>
-  <lightning-card title="Display" icon-name="action:manage_perm_sets">    
+  <lightning-card title="Display" icon-name="action:manage_perm_sets">
     <p class="slds-var-m-horizontal_large slds-var-m-vertical_medium">
-      Count: <lightning-formatted-number value={counter}></lightning-formatted-number>
+      Count:
+      <lightning-formatted-number value={counter}></lightning-formatted-number>
     </p>
-    <lightning-radio-group class="slds-var-m-horizontal_large"
+    <lightning-radio-group
+      class="slds-var-m-horizontal_large"
       name="radioGroup"
       label="Control Option"
       options={options}
-      value={augmentor}
+      value={selectedAugmentor}
       type="radio"
-      onchange={handleAugmentorChange}>
+      onchange={handleAugmentorChange}
+    >
     </lightning-radio-group>
     <c-controls
       operand={augmentor}
       onadd={handleIncrement}
-      onsubtract={handleDecrement}>
+      onsubtract={handleDecrement}
+    >
     </c-controls>
   </lightning-card>
 </template>

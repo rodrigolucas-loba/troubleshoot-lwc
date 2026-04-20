@@ -1,0 +1,19 @@
+{
+  "folders": [
+    {
+      "path": "c:/Users/rodri/Desktop/troubleshoot-lwc"
+    }
+  ],
+  "settings": {
+    "eslint.workingDirectories": [
+      "c:/Users/rodri/Desktop/troubleshoot-lwc"
+    ],
+    "eslint.validate": [
+      "javascript",
+      "typescript"
+    ],
+    "eslint.options": {
+      "overrideConfigFile": "c:\\Users\\rodri\\Desktop\\troubleshoot-lwc\\.eslintrc.json"
+    }
+  }
+}

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<RecordType xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Record_Type</fullName>
+    <active>true</active>
+    <businessProcess>New Sales Process</businessProcess>
+    <label>Record Type</label>
+    <picklistValues>
+        <picklist>Close_Reason__c</picklist>
+        <values>
+            <fullName>Lost%3A Company Budget Constraints</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Lost%3A Competitor</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Lost%3A Other Reason</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Lost%3A Price</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Lost%3A Product Features</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Lost%3A Project Abandoned</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Won%3A Competitor</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Won%3A Other Reason</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Won%3A Price</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Won%3A Product Features</fullName>
+            <default>false</default>
+        </values>
+    </picklistValues>
+    <picklistValues>
+        <picklist>DeliveryInstallationStatus__c</picklist>
+        <values>
+            <fullName>Completed</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>In progress</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Yet to begin</fullName>
+            <default>false</default>
+        </values>
+    </picklistValues>
+    <picklistValues>
+        <picklist>ForecastCategoryName</picklist>
+        <values>
+            <fullName>Best Case</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Closed</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Commit</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Omitted</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Pipeline</fullName>
+            <default>false</default>
+        </values>
+    </picklistValues>
+    <picklistValues>
+        <picklist>LeadSource</picklist>
+        <values>
+            <fullName>Other</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Partner Referral</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Phone Inquiry</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Purchased List</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Web</fullName>
+            <default>false</default>
+        </values>
+    </picklistValues>
+    <picklistValues>
+        <picklist>Type</picklist>
+        <values>
+            <fullName>Existing Customer - Downgrade</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Existing Customer - Replacement</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Existing Customer - Upgrade</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>New Customer</fullName>
+            <default>false</default>
+        </values>
+    </picklistValues>
+</RecordType>

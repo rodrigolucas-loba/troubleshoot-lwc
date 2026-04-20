@@ -1,0 +1,22 @@
+<template>
+  <lightning-card title="Supervisor" icon-name="standard:contact">
+    <div class="slds-var-p-horizontal_small">
+      <template if:true={supervisorId}>
+        <lightning-record-view-form
+          object-api-name="Contact"
+          record-id={supervisorId}
+        >
+          <div class="slds-var-p-around_small">
+            <lightning-output-field field-name="Name"></lightning-output-field>
+            <lightning-output-field field-name="Title"></lightning-output-field>
+            <lightning-output-field field-name="Email"></lightning-output-field>
+            <lightning-output-field field-name="Phone"></lightning-output-field>
+          </div>
+        </lightning-record-view-form>
+      </template>
+      <template if:false={supervisorId}>
+        <div class="slds-var-p-around_small">No supervisor assigned.</div>
+      </template>
+    </div>
+  </lightning-card>
+</template>
