@@ -1,25 +1,25 @@
-Salesforce Code Analyzer / PMD integration summary
-Generated: 2026-04-29
+Resumo da integração Salesforce Code Analyzer / PMD
+Gerado em: 2026-04-29
 
-Changes made
-1. Added custom PMD ruleset file at config/pmd-ruleset.xml.
-2. Added Code Analyzer configuration file at code-analyzer.yml.
-3. Added GitHub Actions workflow at .github/workflows/salesforce-code-analyzer.yml.
-4. Updated scripts/run-salesforce-analyzer.ps1 to run both Recommended and CustomPMD selectors.
-5. Regenerated docs/code-analyzer-report.csv and docs/code-analyzer-report.md after enabling the custom ruleset.
+Alterações efectuadas
+1. Foi adicionado o ficheiro de ruleset PMD custom em config/pmd-ruleset.xml.
+2. Foi adicionado o ficheiro de configuração do Code Analyzer em code-analyzer.yml.
+3. Foi adicionada a workflow de GitHub Actions em .github/workflows/salesforce-code-analyzer.yml.
+4. O ficheiro scripts/run-salesforce-analyzer.ps1 foi actualizado para correr os selectors Recommended e CustomPMD.
+5. Os ficheiros docs/code-analyzer-report.csv e docs/code-analyzer-report.md foram regenerados após a activação do ruleset custom.
 
-Measures taken
-1. The PMD custom ruleset is now versioned inside the repository so the same rules can be used locally and in CI.
-2. The Code Analyzer now loads the custom PMD ruleset through code-analyzer.yml instead of depending on a local file outside the repo.
-3. The GitHub Actions workflow now calls Code Analyzer with --config-file code-analyzer.yml.
-4. The pull request quality gate was aligned with the requirement to fail only on Critical severity findings.
-5. The workflow still publishes analyzer artifacts and PR comments so findings remain visible during review.
+Medidas tomadas
+1. O ruleset PMD custom passou a ficar versionado dentro do repositório, para poder ser usado localmente e em CI.
+2. O Code Analyzer passou a carregar o ruleset PMD custom através do ficheiro code-analyzer.yml, em vez de depender de um ficheiro local fora do repositório.
+3. A workflow de GitHub Actions passou a chamar o Code Analyzer com a opção --config-file code-analyzer.yml.
+4. O quality gate do pull request foi alinhado com o requisito de falhar apenas em findings de severidade Critical.
+5. A workflow continua a publicar artefactos do analyzer e comentários no pull request, para manter visibilidade durante a revisão.
 
-Current validation result
-1. The analyzer ran successfully with Recommended + CustomPMD selectors.
-2. The custom rule CamelCaseMethodNaming was confirmed in the generated CSV output.
-3. The current report still includes one Critical finding from the eslint engine, unrelated to the PMD ruleset itself.
+Resultado actual da validação
+1. O analyzer correu com sucesso usando os selectors Recommended e CustomPMD.
+2. A regra custom CamelCaseMethodNaming foi confirmada no CSV gerado.
+3. O relatório actual continua a incluir um finding Critical vindo do engine eslint, não relacionado com o ruleset PMD em si.
 
-Notes
-1. Unrelated working tree changes were intentionally left untouched.
-2. The temporary inspection file code-analyzer.generated.yml was removed and not included in commit.
+Notas
+1. As alterações não relacionadas que já existiam na working tree foram deixadas intactas.
+2. O ficheiro temporário de inspecção code-analyzer.generated.yml foi removido e não foi incluído no commit.
