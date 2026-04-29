@@ -1,0 +1,25 @@
+Salesforce Code Analyzer / PMD integration summary
+Generated: 2026-04-29
+
+Changes made
+1. Added custom PMD ruleset file at config/pmd-ruleset.xml.
+2. Added Code Analyzer configuration file at code-analyzer.yml.
+3. Added GitHub Actions workflow at .github/workflows/salesforce-code-analyzer.yml.
+4. Updated scripts/run-salesforce-analyzer.ps1 to run both Recommended and CustomPMD selectors.
+5. Regenerated docs/code-analyzer-report.csv and docs/code-analyzer-report.md after enabling the custom ruleset.
+
+Measures taken
+1. The PMD custom ruleset is now versioned inside the repository so the same rules can be used locally and in CI.
+2. The Code Analyzer now loads the custom PMD ruleset through code-analyzer.yml instead of depending on a local file outside the repo.
+3. The GitHub Actions workflow now calls Code Analyzer with --config-file code-analyzer.yml.
+4. The pull request quality gate was aligned with the requirement to fail only on Critical severity findings.
+5. The workflow still publishes analyzer artifacts and PR comments so findings remain visible during review.
+
+Current validation result
+1. The analyzer ran successfully with Recommended + CustomPMD selectors.
+2. The custom rule CamelCaseMethodNaming was confirmed in the generated CSV output.
+3. The current report still includes one Critical finding from the eslint engine, unrelated to the PMD ruleset itself.
+
+Notes
+1. Unrelated working tree changes were intentionally left untouched.
+2. The temporary inspection file code-analyzer.generated.yml was removed and not included in commit.

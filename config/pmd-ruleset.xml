@@ -1,0 +1,150 @@
+<?xml version="1.0" ?>
+<ruleset
+  name="Custom Salesforce Rules"
+  xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd"
+>
+
+    <description>
+        Ruleset based on QUICK_GUIDE Programming Basics: PascalCase for Classes,
+        camelCase for Methods/Variables, and UPPER_CASE for Constants.
+    </description>
+
+    <rule
+    name="PascalCaseClassNaming"
+    language="apex"
+    message="Class names must be in PascalCase (e.g., MyAwesomeClass)."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //UserClass[not(matches(@Image, '^[A-Z][a-zA-Z0-9_]*$'))]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="CamelCaseMethodNaming"
+    language="apex"
+    message="Method names must be in camelCase (e.g., calculateTotal)."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //Method[not(matches(@Image, '^[a-z][a-zA-Z0-9]*$')) and not(@Constructor=true()) and not(@Image = parent::UserClass/@Image) and not(parent::Property)]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="ConstantNamingConventions"
+    language="apex"
+    message="Constants (static final) must be in UPPER_CASE_WITH_UNDERSCORES."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //FieldDeclaration[@Static=true() and @Final=true()]//VariableDeclarator[not(matches(@Image, '^[A-Z][A-Z0-9_]*$'))]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="VariableNamingConventions"
+    language="apex"
+    message="Variables must be in camelCase (e.g., myLocalVariable)."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //VariableDeclaration//VariableDeclarator[not(matches(@Image, '^[a-z][a-zA-Z0-9]*$'))]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="AvoidHardcodedIds"
+    language="apex"
+    message="Do not hardcode Salesforce IDs. Use DeveloperName or Custom Settings."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>1</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //Literal[matches(@Image, "'[a-zA-Z0-9]{15}|[a-zA-Z0-9]{18}'")]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="TestClassAnnotationRequired"
+    language="apex"
+    message="Classes ending in 'Test' must have the @isTest annotation."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //UserClass[matches(@Image, '.*Test$') and not(ModifierNode[@TestLevel=1] or ModifierNode/Annotation[lower-case(@Image)='istest'])]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="ArchitectureSuffixCompliance"
+    language="apex"
+    message="Classes implementing specific logic must use suffixes: TriggerHandler, Batch, or Schedule."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    <![CDATA[
+                    (
+                      //UserClass[implementsList/ClassType[matches(@Image, 'Batchable|Schedulable')]
+                      and not(matches(@Image, '.*(Batch|Schedule|Job)$'))]
+                    |
+                      //UserClass[matches(@Image, '.*Trigger.*')
+                      and not(matches(@Image, '.*TriggerHandler$'))]
+                    )
+                    ]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule
+    name="TestMethodsRequiredInTestClass"
+    language="apex"
+    message="Test classes must contain at least one @isTest method."
+    class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+  >
+        <priority>2</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+                    //UserClass[ModifierNode[@TestLevel=1] and not(.//Method[ModifierNode[@TestLevel=1]])]
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+</ruleset>

@@ -1,0 +1,33 @@
+engines:
+  eslint:
+    auto_discover_eslint_config: true
+  pmd:
+    custom_rulesets:
+      - config/pmd-ruleset.xml
+
+rules:
+  pmd:
+    PascalCaseClassNaming:
+      tags:
+        - CustomPMD
+    CamelCaseMethodNaming:
+      tags:
+        - CustomPMD
+    ConstantNamingConventions:
+      tags:
+        - CustomPMD
+    VariableNamingConventions:
+      tags:
+        - CustomPMD
+    AvoidHardcodedIds:
+      tags:
+        - CustomPMD
+    TestClassAnnotationRequired:
+      tags:
+        - CustomPMD
+    ArchitectureSuffixCompliance:
+      tags:
+        - CustomPMD
+    TestMethodsRequiredInTestClass:
+      tags:
+        - CustomPMD

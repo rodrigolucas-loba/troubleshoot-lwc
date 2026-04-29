@@ -1,7 +1,7 @@
 param(
     [string]$Workspace = ".",
     [string[]]$Targets = @("force-app"),
-    [string[]]$RuleSelectors = @("Recommended"),
+    [string[]]$RuleSelectors = @("Recommended", "CustomPMD"),
     [string]$OutputCsv = "docs/code-analyzer-report.csv",
     [string]$OutputMd = "docs/code-analyzer-report.md",
     [switch]$StageArtifacts

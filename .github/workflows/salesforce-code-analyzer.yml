@@ -1,0 +1,223 @@
+name: Salesforce Code Analyzer Report
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "WI-*"
+    paths-ignore:
+      - "docs/code-analyzer-report.csv"
+      - "docs/code-analyzer-report.md"
+      - "docs/code-analyzer-pr-comment.md"
+  pull_request:
+    branches:
+      - "main"
+      - "a"
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  FAIL_ON_CRITICAL: "true"
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+      ANALYZED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Run Salesforce Code Analyzer
+        id: analyzer
+        continue-on-error: true
+        uses: forcedotcom/run-code-analyzer@v2
+        with:
+          run-arguments: >-
+            --workspace .
+            --target force-app
+            --rule-selector Recommended
+            --rule-selector CustomPMD
+            --config-file code-analyzer.yml
+            --output-file docs/code-analyzer-report.csv
+            --view table
+
+      - name: Generate Markdown summary
+        id: summary
+        shell: pwsh
+        run: |
+          $csvPath = "docs/code-analyzer-report.csv"
+          $mdPath = "docs/code-analyzer-report.md"
+          $prCommentPath = "docs/code-analyzer-pr-comment.md"
+
+          New-Item -ItemType Directory -Force -Path "docs" | Out-Null
+
+          if (-not (Test-Path $csvPath)) {
+            @(
+              "# Salesforce Code Analyzer Summary"
+              ""
+              "No CSV report was generated."
+            ) | Set-Content $mdPath
+
+            @(
+              "## Salesforce Code Analyzer"
+              ""
+              "No CSV report was generated for branch ``$env:BRANCH_NAME``."
+            ) | Set-Content $prCommentPath
+
+            "total=0" >> $env:GITHUB_OUTPUT
+            "high=0" >> $env:GITHUB_OUTPUT
+            "critical=0" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $rows = Import-Csv $csvPath
+          $total = @($rows).Count
+          $criticalCount = 0
+          $highCount = 0
+
+          foreach ($row in $rows) {
+            $severityValue = ""
+            if ($row.PSObject.Properties.Name -contains "Severity") {
+              $severityValue = "$($row.Severity)"
+            } elseif ($row.PSObject.Properties.Name -contains "severity") {
+              $severityValue = "$($row.severity)"
+            }
+
+            if ($severityValue -match '^\s*1\b|Critical') {
+              $criticalCount++
+            } elseif ($severityValue -match '^\s*2\b|High') {
+              $highCount++
+            }
+          }
+
+          @(
+            "# Salesforce Code Analyzer Summary"
+            ""
+            "Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') UTC"
+            ""
+            "Branch: $env:BRANCH_NAME"
+            ""
+            "Commit: $env:ANALYZED_SHA"
+            ""
+            "Total findings: $total"
+            ""
+            "Critical: $criticalCount"
+            "High: $highCount"
+          ) | Set-Content $mdPath
+
+          @(
+            "## Salesforce Code Analyzer"
+            ""
+            "- Branch: ``$env:BRANCH_NAME``"
+            "- Commit: ``$env:ANALYZED_SHA``"
+            "- Total findings: **$total**"
+            "- Critical: **$criticalCount**"
+            "- High: **$highCount**"
+            ""
+            "Artifacts:"
+            "- ``docs/code-analyzer-report.csv``"
+            "- ``docs/code-analyzer-report.md``"
+          ) | Set-Content $prCommentPath
+
+          "total=$total" >> $env:GITHUB_OUTPUT
+          "high=$highCount" >> $env:GITHUB_OUTPUT
+          "critical=$criticalCount" >> $env:GITHUB_OUTPUT
+
+      - name: Upload analyzer reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: salesforce-code-analyzer-${{ github.head_ref || github.ref_name }}
+          path: |
+            docs/code-analyzer-report.csv
+            docs/code-analyzer-report.md
+            docs/code-analyzer-pr-comment.md
+          if-no-files-found: warn
+
+      - name: Comment on open pull request
+        uses: actions/github-script@v7
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = process.env.BRANCH_NAME;
+            const commentPath = 'docs/code-analyzer-pr-comment.md';
+
+            if (!fs.existsSync(commentPath)) {
+              core.info('PR comment file not found. Skipping comment.');
+              return;
+            }
+
+            const body = fs.readFileSync(commentPath, 'utf8');
+            let pull;
+
+            if (context.eventName === 'pull_request') {
+              pull = context.payload.pull_request;
+            } else {
+              const pulls = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: 'open',
+                head: `${owner}:${branch}`
+              });
+
+              if (!pulls.length) {
+                core.info(`No open pull request found for ${branch}.`);
+                return;
+              }
+
+              pull = pulls[0];
+            }
+
+            const marker = '<!-- salesforce-code-analyzer-comment -->';
+            const commentBody = `${marker}\n${body}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pull.number
+            });
+
+            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull.number,
+                body: commentBody
+              });
+            }
+
+      - name: Fail on critical findings
+        if: env.FAIL_ON_CRITICAL == 'true'
+        shell: bash
+        run: |
+          critical="${{ steps.summary.outputs.critical }}"
+
+          if [ "${critical}" -gt 0 ]; then
+            echo "Blocking merge because critical findings were detected."
+            echo "Critical: ${critical}"
+            exit 1
+          fi
