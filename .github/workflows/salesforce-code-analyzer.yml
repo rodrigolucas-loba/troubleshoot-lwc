@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "WI-*"
+      - "github-workflow-metrics"
     paths-ignore:
       - "docs/code-analyzer-report.csv"
       - "docs/code-analyzer-report.md"
