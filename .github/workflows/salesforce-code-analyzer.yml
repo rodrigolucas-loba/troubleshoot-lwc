@@ -32,6 +32,7 @@ jobs:
     env:
       BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
       ANALYZED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SF_AUTH_URL_METRICS: ${{ secrets.SF_AUTH_URL_METRICS }}
 
     steps:
       - name: Checkout branch
@@ -212,20 +213,20 @@ jobs:
             }
 
       - name: Install Salesforce CLI for metrics sync
-        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
         shell: bash
         run: npm install --global @salesforce/cli@latest
 
       - name: Authenticate to Salesforce for metrics sync
-        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
         shell: bash
         run: |
-          printf '%s' '${{ secrets.SF_AUTH_URL_METRICS }}' > authFile.txt
+          printf '%s' "$SF_AUTH_URL_METRICS" > authFile.txt
           sf org login sfdx-url --sfdx-url-file authFile.txt --alias sf-metrics --set-default
 
       - name: Resolve Salesforce connection info
         id: sfconn
-        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
         shell: bash
         run: |
           sf org display --target-org sf-metrics --verbose --json > sf-org.json
@@ -235,7 +236,7 @@ jobs:
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Upsert workflow metrics to Salesforce
-        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
         shell: bash
         env:
           INSTANCE_URL: ${{ steps.sfconn.outputs.instance_url }}
