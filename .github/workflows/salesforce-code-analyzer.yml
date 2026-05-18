@@ -24,6 +24,7 @@ permissions:
 
 env:
   FAIL_ON_CRITICAL: "true"
+  SF_METRICS_OBJECT: "GitHub_Workflow_Metric__c"
 
 jobs:
   analyze:
@@ -209,6 +210,88 @@ jobs:
                 body: commentBody
               });
             }
+
+      - name: Install Salesforce CLI for metrics sync
+        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        run: npm install --global @salesforce/cli@latest
+
+      - name: Authenticate to Salesforce for metrics sync
+        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        run: |
+          printf '%s' '${{ secrets.SF_AUTH_URL_METRICS }}' > authFile.txt
+          sf org login sfdx-url --sfdx-url-file authFile.txt --alias sf-metrics --set-default
+
+      - name: Resolve Salesforce connection info
+        id: sfconn
+        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        run: |
+          sf org display --target-org sf-metrics --verbose --json > sf-org.json
+          INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));console.log(d.result.instanceUrl)")
+          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));console.log(d.result.accessToken)")
+          echo "instance_url=$INSTANCE_URL" >> $GITHUB_OUTPUT
+          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Upsert workflow metrics to Salesforce
+        if: ${{ always() && secrets.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        env:
+          INSTANCE_URL: ${{ steps.sfconn.outputs.instance_url }}
+          ACCESS_TOKEN: ${{ steps.sfconn.outputs.access_token }}
+          TOTAL_FINDINGS: ${{ steps.summary.outputs.total }}
+          HIGH_FINDINGS: ${{ steps.summary.outputs.high }}
+          CRITICAL_FINDINGS: ${{ steps.summary.outputs.critical }}
+          ANALYZER_EXIT_CODE: ${{ steps.analyzer.outputs.exit-code }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          BASE_BRANCH: ${{ github.base_ref || '' }}
+        run: |
+          WORKFLOW_CONCLUSION="success"
+          if [ -n "${ANALYZER_EXIT_CODE}" ] && [ "${ANALYZER_EXIT_CODE}" -gt 0 ]; then
+            WORKFLOW_CONCLUSION="failure"
+          fi
+          if [ "${FAIL_ON_CRITICAL}" = "true" ] && [ "${CRITICAL_FINDINGS:-0}" -gt 0 ]; then
+            WORKFLOW_CONCLUSION="failure"
+          fi
+
+          cat > sf-workflow-metric.json <<EOF
+          {
+            "Project__c": "${{ github.event.repository.name }}",
+            "Repository__c": "${{ github.repository }}",
+            "Workflow_Name__c": "${{ github.workflow }}",
+            "Branch__c": "${{ github.head_ref || github.ref_name }}",
+            "Base_Branch__c": "${BASE_BRANCH}",
+            "Run_Number__c": ${{ github.run_number }},
+            "Run_Url__c": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "Commit_SHA__c": "${{ github.sha }}",
+            "Status__c": "${{ job.status }}",
+            "Conclusion__c": "${WORKFLOW_CONCLUSION}",
+            "Total_Findings__c": ${TOTAL_FINDINGS:-0},
+            "High_Findings__c": ${HIGH_FINDINGS:-0},
+            "Critical_Findings__c": ${CRITICAL_FINDINGS:-0},
+            "Analyzer_Exit_Code__c": ${ANALYZER_EXIT_CODE:-0},
+            "Triggered_By__c": "${{ github.actor }}",
+            "Event_Name__c": "${{ github.event_name }}",
+            "Pull_Request_Number__c": ${PR_NUMBER:-0},
+            "Created_From_GitHub__c": true
+          }
+          EOF
+
+          HTTP_CODE=$(curl -sS -o response.json -w "%{http_code}" \
+            -X PATCH \
+            "${INSTANCE_URL}/services/data/v66.0/sobjects/${SF_METRICS_OBJECT}/Run_Id__c/${{ github.run_id }}" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @sf-workflow-metric.json)
+
+          echo "Salesforce response code: ${HTTP_CODE}"
+          cat response.json || true
+
+          if [ "${HTTP_CODE}" != "201" ] && [ "${HTTP_CODE}" != "204" ]; then
+            echo "Failed to upsert workflow metrics in Salesforce."
+            exit 1
+          fi
 
       - name: Fail on critical findings
         if: env.FAIL_ON_CRITICAL == 'true'
