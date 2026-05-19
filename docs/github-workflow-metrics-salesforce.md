@@ -45,3 +45,4 @@ This repo now includes:
 
 - If the secret is missing, Salesforce sync is skipped and the analyzer workflow still works.
 - The metrics sync runs before the final critical-finding gate so failed quality runs are still written to Salesforce.
+- This file can be updated to force a fresh workflow run on a `WI-*` branch when needed for validation.
