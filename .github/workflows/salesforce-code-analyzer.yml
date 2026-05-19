@@ -111,10 +111,21 @@ jobs:
 
           foreach ($row in $rows) {
             $severityValue = ""
+            $ruleName = ""
             if ($row.PSObject.Properties.Name -contains "Severity") {
               $severityValue = "$($row.Severity)"
             } elseif ($row.PSObject.Properties.Name -contains "severity") {
               $severityValue = "$($row.severity)"
+            }
+            if ($row.PSObject.Properties.Name -contains "Rule") {
+              $ruleName = "$($row.Rule)"
+            } elseif ($row.PSObject.Properties.Name -contains "rule") {
+              $ruleName = "$($row.rule)"
+            }
+
+            $isInfrastructureError = $ruleName -match 'EngineError$'
+            if ($isInfrastructureError) {
+              continue
             }
 
             if ($severityValue -match '^\s*1\b|Critical') {
