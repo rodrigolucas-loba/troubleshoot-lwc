@@ -15,7 +15,15 @@ module.exports = defineConfig([
   // LWC configuration
   {
     files: ["**/lwc/**/*.js"],
-    extends: [lwcConfig]
+    extends: [lwcConfig],
+    settings: {
+      jest: {
+        version: 29
+      }
+    },
+    rules: {
+      "jest/no-deprecated-functions": "off"
+    }
   },
 
   // LWC configuration with override for LWC test files
@@ -28,7 +36,8 @@ module.exports = defineConfig([
       }
     },
     rules: {
-      "@lwc/lwc/no-unexpected-wire-adapter-usages": "off"
+      "@lwc/lwc/no-unexpected-wire-adapter-usages": "off",
+      "jest/no-deprecated-functions": "off"
     },
     languageOptions: {
       globals: {
@@ -44,6 +53,9 @@ module.exports = defineConfig([
       jest: {
         version: 29
       }
+    },
+    rules: {
+      "jest/no-deprecated-functions": "off"
     },
     languageOptions: {
       sourceType: "module",
