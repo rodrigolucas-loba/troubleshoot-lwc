@@ -1,6 +1,8 @@
 engines:
   eslint:
     auto_discover_eslint_config: true
+  flow:
+    disable_engine: true
   pmd:
     custom_rulesets:
       - config/pmd-ruleset.xml
