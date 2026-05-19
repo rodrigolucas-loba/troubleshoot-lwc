@@ -42,19 +42,38 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.head_ref || github.ref_name }}
 
+      - name: Install Salesforce CLI
+        shell: bash
+        run: npm install --global @salesforce/cli@latest
+
+      - name: Install Salesforce Code Analyzer plugin
+        shell: bash
+        run: sf plugins install code-analyzer@latest
+
+      - name: Clean previous analyzer artifacts
+        shell: bash
+        run: |
+          rm -f docs/code-analyzer-report.csv
+          rm -f docs/code-analyzer-report.md
+          rm -f docs/code-analyzer-pr-comment.md
+
       - name: Run Salesforce Code Analyzer
         id: analyzer
         continue-on-error: true
-        uses: forcedotcom/run-code-analyzer@v2
-        with:
-          run-arguments: >-
-            --workspace .
-            --target force-app
-            --rule-selector Recommended
-            --rule-selector CustomPMD
-            --config-file code-analyzer.yml
-            --output-file docs/code-analyzer-report.csv
+        shell: bash
+        run: |
+          set +e
+          sf code-analyzer run \
+            --workspace . \
+            --target force-app \
+            --rule-selector Recommended \
+            --rule-selector CustomPMD \
+            --config-file code-analyzer.yml \
+            --output-file docs/code-analyzer-report.csv \
             --view table
+          EXIT_CODE=$?
+          echo "exit-code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: Generate Markdown summary
         id: summary
@@ -216,7 +235,7 @@ jobs:
       - name: Install Salesforce CLI for metrics sync
         if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
         shell: bash
-        run: npm install --global @salesforce/cli@latest
+        run: sf --version
 
       - name: Authenticate to Salesforce for metrics sync
         if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
