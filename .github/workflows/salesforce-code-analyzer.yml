@@ -320,7 +320,7 @@ jobs:
           echo "Salesforce response code: ${HTTP_CODE}"
           cat response.json || true
 
-          if [ "${HTTP_CODE}" != "201" ] && [ "${HTTP_CODE}" != "204" ]; then
+          if [ "${HTTP_CODE}" != "200" ] && [ "${HTTP_CODE}" != "201" ] && [ "${HTTP_CODE}" != "204" ]; then
             echo "Failed to upsert workflow metrics in Salesforce."
             exit 1
           fi
