@@ -255,24 +255,10 @@ jobs:
           printf '%s' "$SF_AUTH_URL_METRICS" > authFile.txt
           sf org login sfdx-url --sfdx-url-file authFile.txt --alias sf-metrics --set-default
 
-      - name: Resolve Salesforce connection info
-        id: sfconn
-        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
-        shell: bash
-        run: |
-          sf org display --target-org sf-metrics --verbose --json > sf-org.json
-          sf org auth show-access-token --target-org sf-metrics --json > sf-token.json
-          INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));console.log(d.result.instanceUrl)")
-          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-token.json','utf8'));console.log(d.result.accessToken)")
-          echo "instance_url=$INSTANCE_URL" >> $GITHUB_OUTPUT
-          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
-
       - name: Upsert workflow metrics to Salesforce
         if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
         shell: bash
         env:
-          INSTANCE_URL: ${{ steps.sfconn.outputs.instance_url }}
-          ACCESS_TOKEN: ${{ steps.sfconn.outputs.access_token }}
           TOTAL_FINDINGS: ${{ steps.summary.outputs.total }}
           HIGH_FINDINGS: ${{ steps.summary.outputs.high }}
           CRITICAL_FINDINGS: ${{ steps.summary.outputs.critical }}
@@ -280,6 +266,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           BASE_BRANCH: ${{ github.base_ref || '' }}
         run: |
+          sf org display --target-org sf-metrics --verbose --json > sf-org.json
+          sf org auth show-access-token --target-org sf-metrics --json > sf-token.json
+          INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));process.stdout.write(String(d.result.instanceUrl || '').trim())")
+          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-token.json','utf8'));process.stdout.write(String(d.result.accessToken || '').trim())")
+
           WORKFLOW_CONCLUSION="success"
           if [ -n "${ANALYZER_EXIT_CODE}" ] && [ "${ANALYZER_EXIT_CODE}" -gt 0 ]; then
             WORKFLOW_CONCLUSION="failure"
