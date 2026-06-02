@@ -261,8 +261,9 @@ jobs:
         shell: bash
         run: |
           sf org display --target-org sf-metrics --verbose --json > sf-org.json
+          sf org auth show-access-token --target-org sf-metrics --json > sf-token.json
           INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));console.log(d.result.instanceUrl)")
-          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));console.log(d.result.accessToken)")
+          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-token.json','utf8'));console.log(d.result.accessToken)")
           echo "instance_url=$INSTANCE_URL" >> $GITHUB_OUTPUT
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
