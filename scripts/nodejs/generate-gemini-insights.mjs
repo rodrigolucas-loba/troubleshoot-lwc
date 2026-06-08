@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 function getArg(flag, fallback = '') {
   const index = process.argv.indexOf(flag);
@@ -88,6 +89,7 @@ async function main() {
   const markdownPath = getArg('--markdown');
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
   const apiKey = process.env.GEMINI_API_KEY || '';
+  const maxRetries = Number(process.env.GEMINI_MAX_RETRIES || 4);
 
   if (!inputPath || !outputPath || !markdownPath) {
     throw new Error('Missing required arguments: --input, --output, --markdown');
@@ -119,29 +121,60 @@ async function main() {
       JSON.stringify(summary.topIssues || [], null, 2)
     ].join('\n');
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2
-        }
-      })
-    });
+    let response = null;
+    let lastError = '';
 
-    if (response.ok) {
-      const raw = await response.json();
-      const text = raw?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n') || '';
-      if (text) {
-        const parsed = JSON.parse(stripMarkdownFence(text));
-        finalResult = normalizeAiResult(parsed, fallback);
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2
+          }
+        })
+      });
+
+      if (response.ok) {
+        break;
       }
-    } else {
-      console.warn(`Gemini request failed with HTTP ${response.status}`);
+
+      lastError = `Gemini request failed with HTTP ${response.status}`;
+      const isRetryable = response.status === 429 || response.status >= 500;
+      if (!isRetryable || attempt === maxRetries) {
+        break;
+      }
+
+      const waitMs = Math.min(15000, 1000 * (2 ** (attempt - 1)));
+      console.warn(`${lastError}. Retrying in ${waitMs}ms (attempt ${attempt}/${maxRetries})`);
+      await delay(waitMs);
+    }
+
+    if (response?.ok) {
+      try {
+        const raw = await response.json();
+        const text = raw?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n') || '';
+        if (text) {
+          const parsed = JSON.parse(stripMarkdownFence(text));
+          finalResult = normalizeAiResult(parsed, fallback);
+        }
+      } catch (error) {
+        console.warn(`Gemini response parsing failed: ${error.message}`);
+        finalResult = {
+          ...fallback,
+          summary: `${fallback.summary} Gemini ficou indisponivel para parsing e foi usado fallback local.`
+        };
+      }
+    } else if (response) {
+      console.warn(lastError);
+      finalResult = {
+        ...fallback,
+        summary: `${fallback.summary} Gemini ficou indisponivel (HTTP ${response.status}) e foi usado fallback local.`
+      };
     }
   }
 
