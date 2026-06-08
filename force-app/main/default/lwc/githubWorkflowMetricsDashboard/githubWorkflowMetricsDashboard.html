@@ -1,0 +1,130 @@
+<template>
+    <lightning-card title="GitHub Workflow Metrics Dashboard" icon-name="custom:custom63">
+        <div class="actions slds-p-horizontal_medium slds-p-top_small">
+            <lightning-button label="Refresh" onclick={handleRefresh}></lightning-button>
+            <lightning-button class="slds-m-left_small" label="Open Records" onclick={handleOpenRecords}></lightning-button>
+        </div>
+
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading metrics"></lightning-spinner>
+        </template>
+
+        <template if:true={errorMessage}>
+            <div class="slds-p-horizontal_medium slds-text-color_error">{errorMessage}</div>
+        </template>
+
+        <template if:true={hasData}>
+            <div class="dashboard slds-p-around_medium">
+                <section class="summary-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Total runs</div>
+                        <div class="metric-value">{summary.totalRuns}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Total findings</div>
+                        <div class="metric-value">{summary.totalFindings}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">High findings</div>
+                        <div class="metric-value warning">{summary.highFindings}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Critical findings</div>
+                        <div class="metric-value danger">{summary.criticalFindings}</div>
+                    </div>
+                </section>
+
+                <section class="latest-run slds-m-top_large">
+                    <h2 class="section-title">Ultimo run</h2>
+                    <div class="latest-grid">
+                        <div><span class="label">Branch:</span> {summary.latestBranch}</div>
+                        <div><span class="label">Repo:</span> {summary.latestRepository}</div>
+                        <div><span class="label">Conclusion:</span> {summary.latestConclusion}</div>
+                        <div><span class="label">Criado em:</span> {summary.latestCreatedDate}</div>
+                    </div>
+                </section>
+
+                <template if:true={hasLatestAiInsights}>
+                    <section class="ai-insights slds-m-top_large">
+                        <h2 class="section-title">Gemini insights do ultimo run</h2>
+                        <div class="latest-grid">
+                            <div><span class="label">AI risk:</span> {summary.latestAiRiskLevel}</div>
+                            <div><span class="label">Blocking:</span> {summary.latestAiBlocking}</div>
+                            <div><span class="label">Alert sent:</span> {summary.latestAiAlertSent}</div>
+                            <div><span class="label">Alert channel:</span> {summary.latestAiAlertChannel}</div>
+                        </div>
+                        <div class="insight-card slds-m-top_medium">
+                            <div class="label">Summary</div>
+                            <div>{summary.latestAiSummary}</div>
+                        </div>
+                        <div class="insight-card slds-m-top_medium">
+                            <div class="label">Recommended action</div>
+                            <div>{summary.latestAiRecommendedAction}</div>
+                        </div>
+                        <template if:true={latestAiTopIssuesList.length}>
+                            <div class="insight-card slds-m-top_medium">
+                                <div class="label">Top issues</div>
+                                <ul class="issues-list">
+                                    <template for:each={latestAiTopIssuesList} for:item="issue">
+                                        <li key={issue}>{issue}</li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </template>
+                    </section>
+                </template>
+
+                <section class="charts-grid slds-m-top_large">
+                    <div class="chart-card">
+                        <h2 class="section-title">Findings por branch</h2>
+                        <template for:each={branchMetrics} for:item="item">
+                            <div key={item.branch} class="bar-row">
+                                <div class="bar-label">{item.branch}</div>
+                                <div class="bar-track">
+                                    <div class="bar-fill findings" style={item.barStyle}></div>
+                                </div>
+                                <div class="bar-value">{item.findings}</div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="chart-card">
+                        <h2 class="section-title">Runs por conclusion</h2>
+                        <template for:each={conclusionMetrics} for:item="item">
+                            <div key={item.conclusion} class="bar-row">
+                                <div class="bar-label">{item.conclusion}</div>
+                                <div class="bar-track">
+                                    <div class="bar-fill conclusions" style={item.barStyle}></div>
+                                </div>
+                                <div class="bar-value">{item.runs}</div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="chart-card">
+                        <h2 class="section-title">Top repos por findings</h2>
+                        <template for:each={repositoryMetrics} for:item="item">
+                            <div key={item.repository} class="bar-row">
+                                <div class="bar-label">{item.repository}</div>
+                                <div class="bar-track">
+                                    <div class="bar-fill repos" style={item.barStyle}></div>
+                                </div>
+                                <div class="bar-value">{item.findings}</div>
+                            </div>
+                        </template>
+                    </div>
+                </section>
+
+                <section class="slds-m-top_large">
+                    <h2 class="section-title">Runs recentes</h2>
+                    <lightning-datatable
+                        key-field="id"
+                        data={recentRuns}
+                        columns={columns}
+                        hide-checkbox-column>
+                    </lightning-datatable>
+                </section>
+            </div>
+        </template>
+    </lightning-card>
+</template>

@@ -1,0 +1,109 @@
+.dashboard {
+    background: #ffffff;
+}
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.metric-card,
+.chart-card {
+    border: 1px solid #d8dde6;
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+}
+
+.metric-label,
+.label {
+    color: #54698d;
+    font-size: 0.85rem;
+}
+
+.metric-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.metric-value.warning {
+    color: #b45f06;
+}
+
+.metric-value.danger {
+    color: #ba0517;
+}
+
+.section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.latest-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 16px;
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.bar-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 48px;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.bar-label,
+.bar-value {
+    font-size: 0.85rem;
+}
+
+.bar-track {
+    height: 14px;
+    border-radius: 7px;
+    background: #eef2f7;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: 7px;
+}
+
+.bar-fill.findings {
+    background: #0176d3;
+}
+
+.bar-fill.conclusions {
+    background: #2e844a;
+}
+
+.bar-fill.repos {
+    background: #9050e9;
+}
+
+.insight-card {
+    border: 1px solid #d8dde6;
+    border-radius: 8px;
+    padding: 12px;
+    background: #f8fbff;
+}
+
+.issues-list {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}

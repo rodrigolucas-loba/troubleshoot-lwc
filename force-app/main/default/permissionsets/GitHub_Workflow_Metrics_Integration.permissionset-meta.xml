@@ -9,6 +9,46 @@
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Alert_Channel__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Alert_Sent__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Blocking__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Model__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Recommended_Action__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Risk_Level__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Summary__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>GitHub_Workflow_Metric__c.Ai_Top_Issues__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
         <field>GitHub_Workflow_Metric__c.Base_Branch__c</field>
         <readable>true</readable>
     </fieldPermissions>
