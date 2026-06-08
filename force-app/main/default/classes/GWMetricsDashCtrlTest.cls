@@ -47,6 +47,22 @@ private class GWMetricsDashCtrlTest {
             )
         };
 
+        insert new List<GitHub_Workflow_Finding__c>{
+            new GitHub_Workflow_Finding__c(
+                Name = 'Finding A',
+                Finding_Key__c = 'run-b-1',
+                Workflow_Run_Id__c = 'run-b',
+                Workflow_Run_Number__c = 2,
+                Branch__c = 'WI-000002',
+                Repository__c = 'repo/a',
+                Severity__c = '2',
+                Rule__c = 'apex:SecurityRule',
+                Message__c = 'Example issue',
+                Location__c = 'force-app/main/default/classes/MyClass.cls:10',
+                Run_Url__c = 'https://example.test/run-b'
+            )
+        };
+
         Test.startTest();
         GitHubWorkflowMetricsDashboardController.DashboardData data =
             GitHubWorkflowMetricsDashboardController.getDashboardData();
@@ -63,5 +79,7 @@ private class GWMetricsDashCtrlTest {
         System.assertEquals('low', data.latestAiRiskLevel);
         System.assertEquals(false, data.latestAiBlocking);
         System.assertEquals('Run B can proceed.', data.latestAiSummary);
+        System.assertEquals(1, data.latestFindings.size());
+        System.assertEquals('apex:SecurityRule', data.latestFindings[0].rule);
     }
 }

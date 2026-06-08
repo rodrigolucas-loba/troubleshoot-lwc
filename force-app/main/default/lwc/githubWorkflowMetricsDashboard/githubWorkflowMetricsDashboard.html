@@ -124,6 +124,18 @@
                         hide-checkbox-column>
                     </lightning-datatable>
                 </section>
+
+                <template if:true={hasLatestFindings}>
+                    <section class="slds-m-top_large">
+                        <h2 class="section-title">Findings do ultimo run</h2>
+                        <lightning-datatable
+                            key-field="id"
+                            data={latestFindings}
+                            columns={findingColumns}
+                            hide-checkbox-column>
+                        </lightning-datatable>
+                    </section>
+                </template>
             </div>
         </template>
     </lightning-card>

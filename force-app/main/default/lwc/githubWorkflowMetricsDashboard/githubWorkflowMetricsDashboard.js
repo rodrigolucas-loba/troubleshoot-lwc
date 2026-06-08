@@ -27,13 +27,22 @@ const COLUMNS = [
     { label: 'Run URL', fieldName: 'runUrl', type: 'url', typeAttributes: { label: { fieldName: 'runUrl' }, target: '_blank' } }
 ];
 
+const FINDING_COLUMNS = [
+    { label: 'Severity', fieldName: 'severity' },
+    { label: 'Rule', fieldName: 'rule' },
+    { label: 'Location', fieldName: 'location' },
+    { label: 'Message', fieldName: 'message' }
+];
+
 export default class GithubWorkflowMetricsDashboard extends NavigationMixin(LightningElement) {
     columns = COLUMNS;
+    findingColumns = FINDING_COLUMNS;
     summary = {};
     branchMetrics = [];
     repositoryMetrics = [];
     conclusionMetrics = [];
     recentRuns = [];
+    latestFindings = [];
     errorMessage;
     isLoading = true;
     wiredResponse;
@@ -70,6 +79,7 @@ export default class GithubWorkflowMetricsDashboard extends NavigationMixin(Ligh
                 ...item,
                 recordUrl: `/${item.id}`
             }));
+            this.latestFindings = data.latestFindings || [];
         } else if (error) {
             this.errorMessage = error.body?.message || 'Erro ao carregar metricas.';
         }
@@ -103,6 +113,10 @@ export default class GithubWorkflowMetricsDashboard extends NavigationMixin(Ligh
             .split('|')
             .map((item) => item.trim())
             .filter(Boolean);
+    }
+
+    get hasLatestFindings() {
+        return Array.isArray(this.latestFindings) && this.latestFindings.length > 0;
     }
 
     withWidths(items, key) {

@@ -13,6 +13,7 @@ on:
       - "docs/code-analyzer-summary.json"
       - "docs/code-analyzer-ai.json"
       - "docs/code-analyzer-ai-summary.md"
+      - "docs/code-analyzer-findings.json"
       - "docs/cliq-alert-status.json"
   pull_request:
     branches:
@@ -67,6 +68,7 @@ jobs:
           rm -f docs/code-analyzer-summary.json
           rm -f docs/code-analyzer-ai.json
           rm -f docs/code-analyzer-ai-summary.md
+          rm -f docs/code-analyzer-findings.json
           rm -f docs/cliq-alert-status.json
 
       - name: Run Salesforce Code Analyzer
@@ -95,6 +97,7 @@ jobs:
           $mdPath = "docs/code-analyzer-report.md"
           $prCommentPath = "docs/code-analyzer-pr-comment.md"
           $summaryJsonPath = "docs/code-analyzer-summary.json"
+          $findingsJsonPath = "docs/code-analyzer-findings.json"
 
           New-Item -ItemType Directory -Force -Path "docs" | Out-Null
 
@@ -121,6 +124,7 @@ jobs:
             ) | Set-Content $prCommentPath
 
             $summaryObject | ConvertTo-Json -Depth 6 | Set-Content $summaryJsonPath
+            @() | ConvertTo-Json | Set-Content $findingsJsonPath
             "total=0" >> $env:GITHUB_OUTPUT
             "high=0" >> $env:GITHUB_OUTPUT
             "critical=0" >> $env:GITHUB_OUTPUT
@@ -132,6 +136,7 @@ jobs:
           $criticalCount = 0
           $highCount = 0
           $topIssues = New-Object System.Collections.Generic.List[Object]
+          $findings = New-Object System.Collections.Generic.List[Object]
 
           foreach ($row in $rows) {
             $severityValue = ""
@@ -182,6 +187,13 @@ jobs:
                 location = $locationValue
               })
             }
+
+            $findings.Add([PSCustomObject]@{
+              severity = $severityValue
+              rule = $ruleName
+              message = $messageValue
+              location = $locationValue
+            })
           }
 
           $summaryObject = [PSCustomObject]@{
@@ -224,6 +236,7 @@ jobs:
           ) | Set-Content $prCommentPath
 
           $summaryObject | ConvertTo-Json -Depth 6 | Set-Content $summaryJsonPath
+          $findings | ConvertTo-Json -Depth 6 | Set-Content $findingsJsonPath
           "total=$total" >> $env:GITHUB_OUTPUT
           "high=$highCount" >> $env:GITHUB_OUTPUT
           "critical=$criticalCount" >> $env:GITHUB_OUTPUT
@@ -276,6 +289,7 @@ jobs:
             docs/code-analyzer-report.md
             docs/code-analyzer-pr-comment.md
             docs/code-analyzer-summary.json
+            docs/code-analyzer-findings.json
             docs/code-analyzer-ai.json
             docs/code-analyzer-ai-summary.md
             docs/cliq-alert-status.json
@@ -433,6 +447,17 @@ jobs:
             echo "Failed to upsert workflow metrics in Salesforce."
             exit 1
           fi
+
+      - name: Upsert analyzer findings to Salesforce
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        env:
+          FINDINGS_OBJECT: GitHub_Workflow_Finding__c
+        run: |
+          node ./scripts/nodejs/upsert-analyzer-findings.mjs \
+            --input docs/code-analyzer-findings.json \
+            --sf-org sf-org.json \
+            --sf-token sf-token.json
 
       - name: Send Cliq alert
         id: cliq

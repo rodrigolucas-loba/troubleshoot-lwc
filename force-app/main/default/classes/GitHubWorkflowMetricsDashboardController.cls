@@ -19,6 +19,7 @@ public with sharing class GitHubWorkflowMetricsDashboardController {
         @AuraEnabled public List<RepositoryMetric> repositoryMetrics;
         @AuraEnabled public List<ConclusionMetric> conclusionMetrics;
         @AuraEnabled public List<RecentRun> recentRuns;
+        @AuraEnabled public List<RecentFinding> latestFindings;
     }
 
     public class BranchMetric {
@@ -61,6 +62,16 @@ public with sharing class GitHubWorkflowMetricsDashboardController {
         @AuraEnabled public String aiAlertChannel;
     }
 
+    public class RecentFinding {
+        @AuraEnabled public Id id;
+        @AuraEnabled public String name;
+        @AuraEnabled public String severity;
+        @AuraEnabled public String rule;
+        @AuraEnabled public String message;
+        @AuraEnabled public String location;
+        @AuraEnabled public String runUrl;
+    }
+
     @AuraEnabled(cacheable=true)
     public static DashboardData getDashboardData() {
         DashboardData data = new DashboardData();
@@ -68,6 +79,7 @@ public with sharing class GitHubWorkflowMetricsDashboardController {
         data.repositoryMetrics = new List<RepositoryMetric>();
         data.conclusionMetrics = new List<ConclusionMetric>();
         data.recentRuns = new List<RecentRun>();
+        data.latestFindings = new List<RecentFinding>();
 
         AggregateResult totals = [
             SELECT COUNT(Id) totalRuns,
@@ -82,8 +94,9 @@ public with sharing class GitHubWorkflowMetricsDashboardController {
         data.highFindings = decimalOrZero(totals.get('highFindings'));
         data.criticalFindings = decimalOrZero(totals.get('criticalFindings'));
 
+        String latestRunId;
         List<GitHub_Workflow_Metric__c> latestRuns = [
-            SELECT Branch__c, Repository__c, Conclusion__c, CreatedDate,
+            SELECT Run_Id__c, Branch__c, Repository__c, Conclusion__c, CreatedDate,
                    Ai_Summary__c, Ai_Risk_Level__c, Ai_Blocking__c,
                    Ai_Recommended_Action__c, Ai_Top_Issues__c, Ai_Alert_Sent__c,
                    Ai_Alert_Channel__c
@@ -93,6 +106,7 @@ public with sharing class GitHubWorkflowMetricsDashboardController {
         ];
         if (!latestRuns.isEmpty()) {
             GitHub_Workflow_Metric__c latest = latestRuns[0];
+            latestRunId = latest.Run_Id__c;
             data.latestBranch = latest.Branch__c;
             data.latestRepository = latest.Repository__c;
             data.latestConclusion = latest.Conclusion__c;
@@ -104,6 +118,26 @@ public with sharing class GitHubWorkflowMetricsDashboardController {
             data.latestAiTopIssues = latest.Ai_Top_Issues__c;
             data.latestAiAlertSent = latest.Ai_Alert_Sent__c;
             data.latestAiAlertChannel = latest.Ai_Alert_Channel__c;
+        }
+
+        if (String.isNotBlank(latestRunId)) {
+            for (GitHub_Workflow_Finding__c finding : [
+                SELECT Id, Name, Severity__c, Rule__c, Message__c, Location__c, Run_Url__c
+                FROM GitHub_Workflow_Finding__c
+                WHERE Workflow_Run_Id__c = :latestRunId
+                ORDER BY CreatedDate DESC
+                LIMIT 25
+            ]) {
+                RecentFinding item = new RecentFinding();
+                item.id = finding.Id;
+                item.name = finding.Name;
+                item.severity = finding.Severity__c;
+                item.rule = finding.Rule__c;
+                item.message = finding.Message__c;
+                item.location = finding.Location__c;
+                item.runUrl = finding.Run_Url__c;
+                data.latestFindings.add(item);
+            }
         }
 
         for (AggregateResult result : [
