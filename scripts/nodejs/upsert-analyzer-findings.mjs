@@ -9,7 +9,6 @@ async function upsertFinding({ objectName, instanceUrl, accessToken, runId, runN
   const key = `${runId}-${index + 1}`;
   const payload = {
     Name: `${branch} / Finding ${index + 1}`,
-    Finding_Key__c: key,
     Workflow_Run_Id__c: String(runId),
     Workflow_Run_Number__c: Number(runNumber || 0),
     Branch__c: branch || '',
