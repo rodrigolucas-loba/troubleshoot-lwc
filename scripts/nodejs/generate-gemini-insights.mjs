@@ -87,7 +87,7 @@ async function main() {
   const inputPath = getArg('--input');
   const outputPath = getArg('--output');
   const markdownPath = getArg('--markdown');
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const apiKey = process.env.GEMINI_API_KEY || '';
   const maxRetries = Number(process.env.GEMINI_MAX_RETRIES || 4);
 

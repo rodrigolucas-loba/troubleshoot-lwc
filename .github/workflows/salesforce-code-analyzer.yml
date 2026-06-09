@@ -31,7 +31,7 @@ permissions:
 env:
   FAIL_ON_CRITICAL: "true"
   SF_METRICS_OBJECT: "GitHub_Workflow_Metric__c"
-  GEMINI_MODEL: "gemini-2.5-pro"
+  GEMINI_MODEL: "gemini-2.5-flash"
   CLIQ_ALERT_THRESHOLD_HIGH: "3"
 
 jobs:
