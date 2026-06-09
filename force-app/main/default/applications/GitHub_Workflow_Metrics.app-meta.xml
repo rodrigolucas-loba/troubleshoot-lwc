@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomApplication xmlns="http://soap.sforce.com/2006/04/metadata">
+    <brand>
+        <headerColor>#0176D3</headerColor>
+        <shouldOverrideOrgTheme>false</shouldOverrideOrgTheme>
+    </brand>
+    <description>App Lightning para visualizar metricas de workflows GitHub alojadas no Salesforce.</description>
+    <formFactors>Small</formFactors>
+    <formFactors>Large</formFactors>
+    <isNavAutoTempTabsDisabled>false</isNavAutoTempTabsDisabled>
+    <isNavPersonalizationDisabled>false</isNavPersonalizationDisabled>
+    <isNavTabPersistenceDisabled>false</isNavTabPersistenceDisabled>
+    <isOmniPinnedViewEnabled>false</isOmniPinnedViewEnabled>
+    <label>GitHub Workflow Metrics</label>
+    <navType>Standard</navType>
+    <setupExperience>all</setupExperience>
+    <tabs>GitHub_Workflow_Metrics_Dashboard</tabs>
+    <tabs>GitHub_Workflow_Metric__c</tabs>
+    <uiType>Lightning</uiType>
+</CustomApplication>

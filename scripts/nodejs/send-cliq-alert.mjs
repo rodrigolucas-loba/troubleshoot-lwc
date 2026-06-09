@@ -16,6 +16,10 @@ async function main() {
   const outputPath = getArg('--output');
   const webhookUrl = process.env.CLIQ_BOT_WEBHOOK_URL || '';
   const thresholdHigh = Number(process.env.CLIQ_ALERT_THRESHOLD_HIGH || 3);
+  const notifyAllRuns = String(process.env.CLIQ_NOTIFY_ALL_RUNS || 'true') === 'true';
+  const repository = String(process.env.GITHUB_REPOSITORY || '').trim();
+  const runId = String(process.env.GITHUB_RUN_ID || '').trim();
+  const runUrl = repository && runId ? `https://github.com/${repository}/actions/runs/${runId}` : '';
 
   if (!summaryPath || !insightsPath || !outputPath) {
     throw new Error('Missing required arguments: --summary, --insights, --output');
@@ -32,17 +36,20 @@ async function main() {
         topIssues: []
       };
 
-  const shouldAlert =
+  const thresholdTriggered =
     Number(summary.criticalFindings || 0) > 0 ||
     Number(summary.highFindings || 0) >= thresholdHigh ||
     Boolean(insights.blocking);
+  const shouldAlert = notifyAllRuns || thresholdTriggered;
 
   const status = {
     channel: 'Cliq',
     shouldAlert,
     sent: false,
     httpCode: null,
-    reason: shouldAlert ? '' : 'Thresholds not met'
+    reason: shouldAlert ? '' : 'Thresholds not met',
+    notifyAllRuns,
+    thresholdTriggered
   };
 
   if (!shouldAlert || !webhookUrl) {
@@ -55,11 +62,13 @@ async function main() {
   }
 
   const lines = [
-    `GitHub Analyzer Alert`,
+    notifyAllRuns ? `Nova run analisada no GitHub` : `GitHub Analyzer Alert`,
     `Branch: ${summary.branch || '-'}`,
     `Risk: ${insights.riskLevel || '-'}`,
     `Blocking: ${insights.blocking ? 'yes' : 'no'}`,
     `Findings: total ${summary.totalFindings || 0}, high ${summary.highFindings || 0}, critical ${summary.criticalFindings || 0}`,
+    repository ? `Repository: ${repository}` : '',
+    runUrl ? `Run URL: ${runUrl}` : '',
     '',
     `Summary: ${insights.summary || '-'}`,
     `Recommended action: ${insights.recommendedAction || '-'}`,

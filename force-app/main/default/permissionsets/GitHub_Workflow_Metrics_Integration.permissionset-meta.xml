@@ -2,6 +2,10 @@
 <PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
     <description
   >Allows an integration user to create and update GitHub workflow metrics sent from GitHub Actions.</description>
+    <applicationVisibilities>
+        <application>GitHub_Workflow_Metrics</application>
+        <visible>true</visible>
+    </applicationVisibilities>
     <fieldPermissions>
         <editable>true</editable>
         <field>GitHub_Workflow_Metric__c.Analyzer_Exit_Code__c</field>
@@ -207,6 +211,10 @@
         <object>GitHub_Workflow_Metric__c</object>
         <viewAllRecords>false</viewAllRecords>
     </objectPermissions>
+    <tabSettings>
+        <tab>GitHub_Workflow_Metrics_Dashboard</tab>
+        <visibility>Visible</visibility>
+    </tabSettings>
     <tabSettings>
         <tab>GitHub_Workflow_Metric__c</tab>
         <visibility>Visible</visibility>

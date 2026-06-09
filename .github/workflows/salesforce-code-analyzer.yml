@@ -33,6 +33,7 @@ env:
   SF_METRICS_OBJECT: "GitHub_Workflow_Metric__c"
   GEMINI_MODEL: "gemini-2.5-flash"
   CLIQ_ALERT_THRESHOLD_HIGH: "3"
+  CLIQ_NOTIFY_ALL_RUNS: "true"
 
 jobs:
   analyze:

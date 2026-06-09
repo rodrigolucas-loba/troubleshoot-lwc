@@ -2,7 +2,7 @@
 private class GWMetricsDashCtrlTest {
     @IsTest
     static void returnsDashboardData() {
-        insert new List<GitHub_Workflow_Metric__c>{
+        List<GitHub_Workflow_Metric__c> metrics = new List<GitHub_Workflow_Metric__c>{
             new GitHub_Workflow_Metric__c(
                 Name = 'Run A',
                 Branch__c = 'WI-000001',
@@ -46,8 +46,11 @@ private class GWMetricsDashCtrlTest {
                 Ai_Alert_Channel__c = ''
             )
         };
+        insert metrics;
+        Test.setCreatedDate(metrics[0].Id, Datetime.newInstance(2026, 6, 1, 10, 0, 0));
+        Test.setCreatedDate(metrics[1].Id, Datetime.newInstance(2026, 6, 1, 11, 0, 0));
 
-        insert new List<GitHub_Workflow_Finding__c>{
+        List<GitHub_Workflow_Finding__c> findings = new List<GitHub_Workflow_Finding__c>{
             new GitHub_Workflow_Finding__c(
                 Name = 'Finding A',
                 Finding_Key__c = 'run-b-1',
@@ -62,6 +65,8 @@ private class GWMetricsDashCtrlTest {
                 Run_Url__c = 'https://example.test/run-b'
             )
         };
+        insert findings;
+        Test.setCreatedDate(findings[0].Id, Datetime.newInstance(2026, 6, 1, 11, 5, 0));
 
         Test.startTest();
         GitHubWorkflowMetricsDashboardController.DashboardData data =
