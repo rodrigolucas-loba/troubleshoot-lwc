@@ -10,6 +10,8 @@ function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+// Workflow trigger touchpoint for alert endpoint validation.
+
 async function main() {
   const summaryPath = getArg('--summary');
   const insightsPath = getArg('--insights');
