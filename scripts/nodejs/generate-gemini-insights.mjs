@@ -77,7 +77,7 @@ function toMarkdown(ai) {
     '## Insights Gemini',
     '',
     `- Nivel de risco: **${ai.riskLevel}**`,
-    `- Bloqueante: **${ai.blocking ? 'sim' : 'nao'}**`,
+    `- Impede avanco: **${ai.blocking ? 'sim' : 'nao'}**`,
     '',
     '**Resumo**',
     ai.summary,

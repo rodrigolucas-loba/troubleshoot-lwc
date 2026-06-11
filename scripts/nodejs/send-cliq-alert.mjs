@@ -65,17 +65,17 @@ async function main() {
     notifyAllRuns ? `Nova run analisada no GitHub` : `Alerta do GitHub Analyzer`,
     repository ? `Repositorio: ${repository}` : '',
     `Branch: ${summary.branch || '-'}`,
-    `Risco: ${insights.riskLevel || '-'}`,
-    `Bloqueante: ${insights.blocking ? 'sim' : 'nao'}`,
+    `Nivel de risco: ${insights.riskLevel || '-'}`,
+    `Impede avanco: ${insights.blocking ? 'sim' : 'nao'}`,
     `Findings: total ${summary.totalFindings || 0} | high ${summary.highFindings || 0} | critical ${summary.criticalFindings || 0}`,
-    runUrl ? `Run: ${runUrl}` : '',
+    runUrl ? `Execucao: ${runUrl}` : '',
     '',
     `Resumo: ${insights.summary || '-'}`,
     `Acao recomendada: ${insights.recommendedAction || '-'}`,
   ];
 
   if (Array.isArray(insights.topIssues) && insights.topIssues.length) {
-    lines.push('', 'Principais issues:');
+    lines.push('', 'Principais problemas:');
     for (const issue of insights.topIssues.slice(0, 5)) {
       lines.push(`- ${issue}`);
     }
