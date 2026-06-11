@@ -62,16 +62,16 @@ async function main() {
   }
 
   const lines = [
-    notifyAllRuns ? `Nova run analisada no GitHub` : `GitHub Analyzer Alert`,
+    notifyAllRuns ? `Nova run analisada no GitHub` : `Alerta do GitHub Analyzer`,
+    repository ? `Repositorio: ${repository}` : '',
     `Branch: ${summary.branch || '-'}`,
-    `Risk: ${insights.riskLevel || '-'}`,
-    `Blocking: ${insights.blocking ? 'yes' : 'no'}`,
-    `Findings: total ${summary.totalFindings || 0}, high ${summary.highFindings || 0}, critical ${summary.criticalFindings || 0}`,
-    repository ? `Repository: ${repository}` : '',
-    runUrl ? `Run URL: ${runUrl}` : '',
+    `Risco: ${insights.riskLevel || '-'}`,
+    `Blocking: ${insights.blocking ? 'sim' : 'nao'}`,
+    `Findings: total ${summary.totalFindings || 0} | high ${summary.highFindings || 0} | critical ${summary.criticalFindings || 0}`,
+    runUrl ? `Run: ${runUrl}` : '',
     '',
-    `Summary: ${insights.summary || '-'}`,
-    `Recommended action: ${insights.recommendedAction || '-'}`,
+    `Resumo: ${insights.summary || '-'}`,
+    `Acao recomendada: ${insights.recommendedAction || '-'}`,
   ];
 
   if (Array.isArray(insights.topIssues) && insights.topIssues.length) {
