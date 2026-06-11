@@ -11,6 +11,16 @@ function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+function translateIssueText(value) {
+  return String(value || '')
+    .replaceAll('Missing ApexDoc comment', 'Falta comentario ApexDoc')
+    .replaceAll('The annotation @isTest should be in PascalCase: @IsTest', 'A anotacao @isTest deve estar em PascalCase: @IsTest')
+    .replaceAll('Apex unit test classes should have at least one System.runAs() call', 'Classes de teste Apex devem ter pelo menos uma chamada a System.runAs()')
+    .replaceAll('Avoid SOQL queries without a where or limit statement', 'Evitar queries SOQL sem clausula where ou limit')
+    .replaceAll('Validate CRUD permission before SOQL/DML operation or enforce user mode', 'Validar permissao CRUD antes de operacoes SOQL/DML ou impor user mode')
+    .trim();
+}
+
 function buildFallback(summary) {
   const critical = Number(summary.criticalFindings || 0);
   const high = Number(summary.highFindings || 0);
@@ -18,18 +28,21 @@ function buildFallback(summary) {
   const riskLevel = critical > 0 ? 'critical' : high > 0 ? 'high' : total > 0 ? 'medium' : 'low';
   const blocking = critical > 0;
   const recommendedAction = critical > 0
-    ? 'Corrigir os findings críticos antes do merge ou promotion.'
+    ? 'Corrigir os findings criticos antes do merge ou promotion.'
     : high > 0
-      ? 'Priorizar os findings high e validar impacto antes do merge.'
+      ? 'Priorizar os findings high e validar o impacto antes do merge.'
       : total > 0
-        ? 'Rever findings moderados e baixos para limpar o branch.'
-        : 'Sem findings relevantes. O run pode avançar.';
+        ? 'Rever os findings moderados e baixos para limpar a branch.'
+        : 'Sem findings relevantes. O run pode avancar.';
   const topIssues = Array.isArray(summary.topIssues)
-    ? summary.topIssues.slice(0, 5).map((item) => `${item.severity || '-'} | ${item.rule || '-'} | ${item.message || '-'}`.trim())
+    ? summary.topIssues.slice(0, 5).map((item) => {
+      const message = translateIssueText(item.message || '-');
+      return `Severidade ${item.severity || '-'} | Regra ${item.rule || '-'} | ${message}`.trim();
+    })
     : [];
 
   return {
-    summary: `Run do analyzer em ${summary.branch || '-'} com ${total} findings, ${high} high e ${critical} critical.`,
+    summary: `Run do analyzer na branch ${summary.branch || '-'} com ${total} findings, ${high} high e ${critical} critical.`,
     riskLevel,
     blocking,
     recommendedAction,
@@ -54,27 +67,27 @@ function normalizeAiResult(candidate, fallback) {
     blocking: typeof candidate.blocking === 'boolean' ? candidate.blocking : fallback.blocking,
     recommendedAction: String(candidate.recommendedAction || fallback.recommendedAction || '').trim().slice(0, 1000),
     topIssues: Array.isArray(candidate.topIssues)
-      ? candidate.topIssues.map((item) => String(item).trim()).filter(Boolean).slice(0, 5)
+      ? candidate.topIssues.map((item) => translateIssueText(item)).filter(Boolean).slice(0, 5)
       : fallback.topIssues
   };
 }
 
 function toMarkdown(ai) {
   const lines = [
-    '## Gemini Insights',
+    '## Insights Gemini',
     '',
-    `- Risk level: **${ai.riskLevel}**`,
-    `- Blocking: **${ai.blocking ? 'yes' : 'no'}**`,
+    `- Nivel de risco: **${ai.riskLevel}**`,
+    `- Bloqueante: **${ai.blocking ? 'sim' : 'nao'}**`,
     '',
-    '**Summary**',
+    '**Resumo**',
     ai.summary,
     '',
-    '**Recommended action**',
+    '**Acao recomendada**',
     ai.recommendedAction
   ];
 
   if (ai.topIssues.length) {
-    lines.push('', '**Top issues**');
+    lines.push('', '**Principais issues**');
     for (const issue of ai.topIssues) {
       lines.push(`- ${issue}`);
     }
@@ -101,16 +114,19 @@ async function main() {
 
   if (apiKey) {
     const prompt = [
-      'You are reviewing Salesforce Code Analyzer findings from a GitHub Actions run.',
-      'Return ONLY valid JSON with these keys:',
+      'Estas a analisar findings do Salesforce Code Analyzer de um run do GitHub Actions.',
+      'Responde SEMPRE em portugues de Portugal.',
+      'Devolve APENAS JSON valido com estas chaves:',
       'summary: string',
       'riskLevel: one of low, medium, high, critical',
       'blocking: boolean',
       'recommendedAction: string',
-      'topIssues: array of up to 5 short strings',
+      'topIssues: array of ate 5 strings curtas em portugues de Portugal',
       '',
-      'Interpret the findings pragmatically. Treat any critical finding as blocking.',
-      'If there are only high findings, blocking can be false if the change can still proceed with follow-up work.',
+      'Interpreta os findings de forma pragmatica.',
+      'Qualquer finding critical deve ser tratado como bloqueante.',
+      'Se existirem apenas findings high, blocking pode ser false se a alteracao puder avancar com follow-up posterior.',
+      'Mantem riskLevel com um destes valores exatos: low, medium, high, critical.',
       '',
       `Branch: ${summary.branch || '-'}`,
       `Commit: ${summary.commit || '-'}`,
@@ -166,14 +182,14 @@ async function main() {
         console.warn(`Gemini response parsing failed: ${error.message}`);
         finalResult = {
           ...fallback,
-          summary: `${fallback.summary} Gemini ficou indisponivel para parsing e foi usado fallback local.`
+          summary: `${fallback.summary} O Gemini ficou indisponivel para parsing e foi usado fallback local.`
         };
       }
     } else if (response) {
       console.warn(lastError);
       finalResult = {
         ...fallback,
-        summary: `${fallback.summary} Gemini ficou indisponivel (HTTP ${response.status}) e foi usado fallback local.`
+        summary: `${fallback.summary} O Gemini ficou indisponivel (HTTP ${response.status}) e foi usado fallback local.`
       };
     }
   }

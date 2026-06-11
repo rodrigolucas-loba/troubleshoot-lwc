@@ -10,8 +10,6 @@ function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-// Workflow trigger touchpoint for alert endpoint validation.
-
 async function main() {
   const summaryPath = getArg('--summary');
   const insightsPath = getArg('--insights');
@@ -49,14 +47,14 @@ async function main() {
     shouldAlert,
     sent: false,
     httpCode: null,
-    reason: shouldAlert ? '' : 'Thresholds not met',
+    reason: shouldAlert ? '' : 'Limiares nao atingidos',
     notifyAllRuns,
     thresholdTriggered
   };
 
   if (!shouldAlert || !webhookUrl) {
     if (!webhookUrl) {
-      status.reason = 'Webhook not configured';
+      status.reason = 'Webhook nao configurado';
     }
     ensureDir(outputPath);
     fs.writeFileSync(outputPath, `${JSON.stringify(status, null, 2)}\n`);
@@ -68,7 +66,7 @@ async function main() {
     repository ? `Repositorio: ${repository}` : '',
     `Branch: ${summary.branch || '-'}`,
     `Risco: ${insights.riskLevel || '-'}`,
-    `Blocking: ${insights.blocking ? 'sim' : 'nao'}`,
+    `Bloqueante: ${insights.blocking ? 'sim' : 'nao'}`,
     `Findings: total ${summary.totalFindings || 0} | high ${summary.highFindings || 0} | critical ${summary.criticalFindings || 0}`,
     runUrl ? `Run: ${runUrl}` : '',
     '',
@@ -77,7 +75,7 @@ async function main() {
   ];
 
   if (Array.isArray(insights.topIssues) && insights.topIssues.length) {
-    lines.push('', 'Top issues:');
+    lines.push('', 'Principais issues:');
     for (const issue of insights.topIssues.slice(0, 5)) {
       lines.push(`- ${issue}`);
     }
@@ -93,7 +91,7 @@ async function main() {
 
   status.httpCode = response.status;
   status.sent = response.ok;
-  status.reason = response.ok ? '' : `Webhook responded with HTTP ${response.status}`;
+  status.reason = response.ok ? '' : `Webhook respondeu com HTTP ${response.status}`;
 
   ensureDir(outputPath);
   fs.writeFileSync(outputPath, `${JSON.stringify(status, null, 2)}\n`);
