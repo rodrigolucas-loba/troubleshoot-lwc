@@ -154,10 +154,6 @@ async function main() {
   const sourceDir = path.resolve(root, args.sourceDir);
   const projectPath = path.resolve(root, "sfdx-project.json");
 
-  if (!(await pathExists(projectPath))) {
-    throw new Error("sfdx-project.json was not found in the repository root.");
-  }
-
   if (!(await pathExists(sourceDir))) {
     throw new Error(`Source directory was not found: ${args.sourceDir}`);
   }
@@ -165,9 +161,28 @@ async function main() {
   const changes = [];
   const warnings = [];
 
-  const projectRaw = await fs.readFile(projectPath, "utf8");
-  const projectJson = JSON.parse(projectRaw);
-  const previousSourceApi = projectJson.sourceApiVersion || "";
+  let projectJson;
+  let previousSourceApi = "";
+
+  if (await pathExists(projectPath)) {
+    const projectRaw = await fs.readFile(projectPath, "utf8");
+    projectJson = JSON.parse(projectRaw);
+    previousSourceApi = projectJson.sourceApiVersion || "";
+  } else {
+    warnings.push("sfdx-project.json was not found. A minimal project file was created in the runner for validation.");
+    projectJson = {
+      packageDirectories: [
+        {
+          path: args.sourceDir,
+          default: true,
+        },
+      ],
+      name: "api-version-upgrade-guard",
+      namespace: "",
+      sfdcLoginUrl: "https://login.salesforce.com",
+      sourceApiVersion: targetApi,
+    };
+  }
 
   if (previousSourceApi !== targetApi) {
     projectJson.sourceApiVersion = targetApi;
