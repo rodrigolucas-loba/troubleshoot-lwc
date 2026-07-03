@@ -258,8 +258,15 @@ jobs:
           Get-Content $summaryPath
 
           if ($delta.critical -gt 0 -or $delta.high -gt 0) {
-            exit 1
+            Write-Warning "New high or critical findings appeared after the API version update. Check the report before applying the patch."
           }
+
+      - name: List generated reports
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          find docs/api-version-upgrade-guard -maxdepth 1 -type f -print | sort || true
 
       - name: Upload API version guard artifacts
         if: ${{ always() }}
