@@ -1,0 +1,278 @@
+name: API Version Upgrade Guard
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_api_version:
+        description: "Target Salesforce API version, for example 66.0"
+        required: true
+        default: "66.0"
+        type: string
+      source_dir:
+        description: "Salesforce source directory"
+        required: true
+        default: "force-app"
+        type: string
+      target_ref:
+        description: "Branch or ref containing the Salesforce project to test"
+        required: true
+        default: "monitoring_loba_b_dev_ed_develop"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  SF_CLI_VERSION: "2.133.4"
+  SF_CODE_ANALYZER_VERSION: "5.13.0"
+  REPORT_DIR: "docs/api-version-upgrade-guard"
+
+jobs:
+  api-version-upgrade-guard:
+    name: Test API version upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout workflow tools
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: tools
+
+      - name: Checkout target project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_ref }}
+          path: project
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Salesforce CLI
+        shell: bash
+        run: npm install --global @salesforce/cli@${SF_CLI_VERSION}
+
+      - name: Install Salesforce Code Analyzer plugin
+        shell: bash
+        run: sf plugins install code-analyzer@${SF_CODE_ANALYZER_VERSION}
+
+      - name: Prepare report directory
+        shell: bash
+        working-directory: project
+        run: |
+          mkdir -p "${REPORT_DIR}"
+          rm -f "${REPORT_DIR}"/*
+
+      - name: Run analyzer before API version update
+        id: analyzer-before
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        run: |
+          set +e
+          sf code-analyzer run \
+            --workspace . \
+            --target "${{ inputs.source_dir }}" \
+            --rule-selector Recommended \
+            --output-file "${REPORT_DIR}/analyzer-before.csv" \
+            --view table
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Apply API version update in runner
+        id: api-version-guard
+        shell: bash
+        working-directory: project
+        run: |
+          node ../tools/scripts/nodejs/api-version-upgrade-guard.mjs \
+            --target-api "${{ inputs.target_api_version }}" \
+            --source-dir "${{ inputs.source_dir }}" \
+            --report "${REPORT_DIR}/api-version-upgrade-report.md" \
+            --json "${REPORT_DIR}/api-version-upgrade-report.json"
+
+      - name: Verify only API version files changed
+        shell: bash
+        working-directory: project
+        run: |
+          set -euo pipefail
+
+          git diff --name-only > "${REPORT_DIR}/changed-files.txt"
+
+          invalid=0
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+
+            if [ "$file" = "sfdx-project.json" ]; then
+              continue
+            fi
+
+            if [[ "$file" == *"-meta.xml" ]]; then
+              continue
+            fi
+
+            echo "Unexpected changed file: $file"
+            invalid=1
+          done < "${REPORT_DIR}/changed-files.txt"
+
+          if [ "$invalid" -ne 0 ]; then
+            echo "API version guard changed files outside the allowed scope."
+            exit 1
+          fi
+
+      - name: Save API version patch
+        shell: bash
+        working-directory: project
+        run: git diff > "${REPORT_DIR}/api-version-upgrade.patch"
+
+      - name: Run analyzer after API version update
+        id: analyzer-after
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        run: |
+          set +e
+          sf code-analyzer run \
+            --workspace . \
+            --target "${{ inputs.source_dir }}" \
+            --rule-selector Recommended \
+            --output-file "${REPORT_DIR}/analyzer-after.csv" \
+            --view table
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Compare analyzer results
+        id: compare
+        shell: pwsh
+        working-directory: project
+        run: |
+          $beforePath = "${env:REPORT_DIR}/analyzer-before.csv"
+          $afterPath = "${env:REPORT_DIR}/analyzer-after.csv"
+          $summaryPath = "${env:REPORT_DIR}/analyzer-comparison.md"
+          $jsonPath = "${env:REPORT_DIR}/analyzer-comparison.json"
+
+          function Read-AnalyzerCsv($path) {
+            if (Test-Path $path) {
+              return @(Import-Csv $path)
+            }
+            return @()
+          }
+
+          function Get-Value($row, [string[]]$names) {
+            foreach ($name in $names) {
+              if ($row.PSObject.Properties.Name -contains $name) {
+                return "$($row.PSObject.Properties[$name].Value)"
+              }
+            }
+            return ""
+          }
+
+          function Get-Stats($rows) {
+            $total = 0
+            $critical = 0
+            $high = 0
+            $apiVersion = 0
+
+            foreach ($row in $rows) {
+              $rule = Get-Value $row @("Rule", "rule", "RuleName", "ruleName", "Rule Name")
+              $severity = Get-Value $row @("Severity", "severity")
+              $message = Get-Value $row @("Message", "message", "Description", "description")
+
+              if ($rule -match 'EngineError$') {
+                continue
+              }
+
+              $total++
+
+              if ($severity -match '^\s*1\b|Critical') {
+                $critical++
+              } elseif ($severity -match '^\s*2\b|High') {
+                $high++
+              }
+
+              if ("$rule $message" -match '(?i)api\s*version|apiVersion|sourceApiVersion') {
+                $apiVersion++
+              }
+            }
+
+            return [PSCustomObject]@{
+              total = $total
+              critical = $critical
+              high = $high
+              apiVersionRelated = $apiVersion
+            }
+          }
+
+          $before = Get-Stats (Read-AnalyzerCsv $beforePath)
+          $after = Get-Stats (Read-AnalyzerCsv $afterPath)
+
+          $delta = [PSCustomObject]@{
+            total = $after.total - $before.total
+            critical = $after.critical - $before.critical
+            high = $after.high - $before.high
+            apiVersionRelated = $after.apiVersionRelated - $before.apiVersionRelated
+          }
+
+          $result = [PSCustomObject]@{
+            before = $before
+            after = $after
+            delta = $delta
+            analyzerBeforeExitCode = "${{ steps.analyzer-before.outputs.exit_code }}"
+            analyzerAfterExitCode = "${{ steps.analyzer-after.outputs.exit_code }}"
+          }
+
+          $result | ConvertTo-Json -Depth 6 | Set-Content $jsonPath
+
+          @(
+            "# API Version Upgrade Analyzer Comparison"
+            ""
+            "- Target API version: ${{ inputs.target_api_version }}"
+            "- Target ref: ${{ inputs.target_ref }}"
+            "- Source directory: ${{ inputs.source_dir }}"
+            "- Analyzer before exit code: ${{ steps.analyzer-before.outputs.exit_code }}"
+            "- Analyzer after exit code: ${{ steps.analyzer-after.outputs.exit_code }}"
+            ""
+            "| Metric | Before | After | Delta |"
+            "| --- | ---: | ---: | ---: |"
+            "| Total findings | $($before.total) | $($after.total) | $($delta.total) |"
+            "| Critical findings | $($before.critical) | $($after.critical) | $($delta.critical) |"
+            "| High findings | $($before.high) | $($after.high) | $($delta.high) |"
+            "| API version related findings | $($before.apiVersionRelated) | $($after.apiVersionRelated) | $($delta.apiVersionRelated) |"
+            ""
+            "## Decision"
+            ""
+            $(if ($delta.critical -gt 0 -or $delta.high -gt 0) {
+              "NOT SAFE: new high or critical findings appeared after the API version update."
+            } elseif ($delta.apiVersionRelated -lt 0) {
+              "PROMISING: API version related findings decreased and no new high/critical findings appeared."
+            } else {
+              "NEUTRAL: no API version related improvement detected, but no new high/critical findings appeared."
+            })
+          ) | Set-Content $summaryPath
+
+          Get-Content $summaryPath
+
+          if ($delta.critical -gt 0 -or $delta.high -gt 0) {
+            exit 1
+          }
+
+      - name: Upload API version guard artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-version-upgrade-guard-${{ github.run_number }}
+          path: |
+            project/docs/api-version-upgrade-guard/api-version-upgrade-report.md
+            project/docs/api-version-upgrade-guard/api-version-upgrade-report.json
+            project/docs/api-version-upgrade-guard/api-version-upgrade.patch
+            project/docs/api-version-upgrade-guard/changed-files.txt
+            project/docs/api-version-upgrade-guard/analyzer-before.csv
+            project/docs/api-version-upgrade-guard/analyzer-after.csv
+            project/docs/api-version-upgrade-guard/analyzer-comparison.md
+            project/docs/api-version-upgrade-guard/analyzer-comparison.json
+          if-no-files-found: warn
