@@ -160,15 +160,19 @@ async function main() {
 
   const changes = [];
   const warnings = [];
+  const temporaryFiles = [];
 
   let projectJson;
   let previousSourceApi = "";
+  let projectFileWasMissing = false;
 
   if (await pathExists(projectPath)) {
     const projectRaw = await fs.readFile(projectPath, "utf8");
     projectJson = JSON.parse(projectRaw);
     previousSourceApi = projectJson.sourceApiVersion || "";
   } else {
+    projectFileWasMissing = true;
+    temporaryFiles.push("sfdx-project.json");
     warnings.push("sfdx-project.json was not found. A minimal project file was created in the runner for validation.");
     projectJson = {
       packageDirectories: [
@@ -191,7 +195,8 @@ async function main() {
       file: "sfdx-project.json",
       previousApiVersion: previousSourceApi,
       targetApiVersion: targetApi,
-      status: args.dryRun ? "would update" : "updated",
+      status: projectFileWasMissing ? "temporary runner file" : args.dryRun ? "would update" : "updated",
+      temporary: projectFileWasMissing,
     });
 
     if (!args.dryRun) {
@@ -224,6 +229,7 @@ async function main() {
         previousApiVersion: result.previous,
         targetApiVersion: targetApi,
         status: args.dryRun ? "would update" : "updated",
+        temporary: false,
       });
 
       if (!args.dryRun) {
@@ -241,6 +247,8 @@ async function main() {
     sourceDir: toPosix(path.relative(root, sourceDir)) || ".",
     scannedMetadataFiles,
     changedFiles: changes.length,
+    realChangedFiles: changes.filter((change) => !change.temporary).length,
+    temporaryFiles,
     warnings,
     changes,
   };
@@ -254,6 +262,8 @@ async function main() {
 - Dry run: \`${args.dryRun}\`
 - Metadata files scanned: **${scannedMetadataFiles}**
 - Files changed: **${changes.length}**
+- Real proposed files changed: **${report.realChangedFiles}**
+- Temporary runner files: **${temporaryFiles.length ? temporaryFiles.map((file) => `\`${file}\``).join(", ") : "None"}**
 
 ## Changes
 

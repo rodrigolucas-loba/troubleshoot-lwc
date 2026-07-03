@@ -18,6 +18,19 @@ on:
         required: true
         default: "monitoring_loba_b_dev_ed_develop"
         type: string
+      run_deploy_validate:
+        description: "Run sf project deploy validate when SF_AUTH_URL_API_GUARD is configured"
+        required: true
+        default: false
+        type: boolean
+      test_level:
+        description: "Salesforce deploy validation test level"
+        required: true
+        default: "NoTestRun"
+        type: choice
+        options:
+          - NoTestRun
+          - RunLocalTests
 
 permissions:
   contents: read
@@ -26,6 +39,7 @@ env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
   REPORT_DIR: "docs/api-version-upgrade-guard"
+  SF_AUTH_URL_API_GUARD: ${{ secrets.SF_AUTH_URL_API_GUARD }}
 
 jobs:
   api-version-upgrade-guard:
@@ -39,6 +53,7 @@ jobs:
         with:
           fetch-depth: 0
           path: tools
+          submodules: false
 
       - name: Checkout target project
         uses: actions/checkout@v4
@@ -46,6 +61,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.target_ref }}
           path: project
+          submodules: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -96,38 +112,67 @@ jobs:
             --json "${REPORT_DIR}/api-version-upgrade-report.json"
 
       - name: Verify only API version files changed
-        shell: bash
+        shell: pwsh
         working-directory: project
         run: |
-          set -euo pipefail
+          $reportDir = $env:REPORT_DIR
+          git diff --name-only | Set-Content "$reportDir/changed-files.txt"
 
-          git diff --name-only > "${REPORT_DIR}/changed-files.txt"
+          $report = Get-Content "$reportDir/api-version-upgrade-report.json" -Raw | ConvertFrom-Json
+          $temporaryFiles = @($report.temporaryFiles)
+          $invalid = New-Object System.Collections.Generic.List[string]
 
-          invalid=0
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
+          $changedFiles = @(Get-Content "$reportDir/changed-files.txt" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
-            if [ "$file" = "sfdx-project.json" ]; then
+          foreach ($file in $changedFiles) {
+            if ($file -eq "sfdx-project.json") {
+              if ($temporaryFiles -contains "sfdx-project.json") {
+                continue
+              }
+
+              $changedLines = @(git diff --unified=0 -- "$file" | Where-Object {
+                ($_ -match '^[+-]') -and
+                ($_ -notmatch '^\+\+\+|^---') -and
+                ($_ -notmatch '"sourceApiVersion"')
+              })
+
+              if ($changedLines.Count -gt 0) {
+                $invalid.Add("$file changed content other than sourceApiVersion.")
+              }
               continue
-            fi
+            }
 
-            if [[ "$file" == *"-meta.xml" ]]; then
+            if ($file -like "*-meta.xml") {
+              $changedLines = @(git diff --unified=0 -- "$file" | Where-Object {
+                ($_ -match '^[+-]') -and
+                ($_ -notmatch '^\+\+\+|^---') -and
+                ($_ -notmatch '<apiVersion>')
+              })
+
+              if ($changedLines.Count -gt 0) {
+                $invalid.Add("$file changed XML content outside apiVersion.")
+              }
               continue
-            fi
+            }
 
-            echo "Unexpected changed file: $file"
-            invalid=1
-          done < "${REPORT_DIR}/changed-files.txt"
+            $invalid.Add("Unexpected changed file: $file")
+          }
 
-          if [ "$invalid" -ne 0 ]; then
-            echo "API version guard changed files outside the allowed scope."
+          if ($invalid.Count -gt 0) {
+            $invalid | Set-Content "$reportDir/invalid-diff.txt"
+            $invalid | ForEach-Object { Write-Error $_ }
             exit 1
-          fi
+          }
+
+          "Diff validation passed. Only API version content changed." | Set-Content "$reportDir/diff-validation.txt"
 
       - name: Save API version patch
         shell: bash
         working-directory: project
-        run: git diff > "${REPORT_DIR}/api-version-upgrade.patch"
+        run: |
+          git diff > "${REPORT_DIR}/api-version-upgrade-full.patch"
+          git diff -- . ':(exclude)sfdx-project.json' > "${REPORT_DIR}/api-version-upgrade-real.patch"
+          cp "${REPORT_DIR}/api-version-upgrade-real.patch" "${REPORT_DIR}/api-version-upgrade.patch"
 
       - name: Run analyzer after API version update
         id: analyzer-after
@@ -155,6 +200,7 @@ jobs:
           $afterPath = "${env:REPORT_DIR}/analyzer-after.csv"
           $summaryPath = "${env:REPORT_DIR}/analyzer-comparison.md"
           $jsonPath = "${env:REPORT_DIR}/analyzer-comparison.json"
+          $htmlPath = "${env:REPORT_DIR}/api-version-upgrade-summary.html"
 
           function Read-AnalyzerCsv($path) {
             if (Test-Path $path) {
@@ -170,6 +216,42 @@ jobs:
               }
             }
             return ""
+          }
+
+          function Normalize-Location([string]$value) {
+            $location = "$value" -replace '\\', '/'
+            return $location -replace ':\d+(:\d+)?$', ''
+          }
+
+          function Convert-Finding($row) {
+            $rule = Get-Value $row @("Rule", "rule", "RuleName", "ruleName", "Rule Name")
+            $severity = Get-Value $row @("Severity", "severity")
+            $message = Get-Value $row @("Message", "message", "Description", "description")
+            $location = Get-Value $row @("Location", "location", "File", "file", "Source", "source")
+            $normalizedLocation = Normalize-Location $location
+            $key = "$severity|$rule|$normalizedLocation|$message"
+
+            return [PSCustomObject]@{
+              key = $key
+              severity = $severity
+              rule = $rule
+              message = $message
+              location = $location
+              normalizedLocation = $normalizedLocation
+              apiVersionRelated = ("$rule $message" -match '(?i)api\s*version|apiVersion|sourceApiVersion')
+            }
+          }
+
+          function Convert-Findings($rows) {
+            $findings = New-Object System.Collections.Generic.List[object]
+            foreach ($row in $rows) {
+              $finding = Convert-Finding $row
+              if ($finding.rule -match 'EngineError$') {
+                continue
+              }
+              $findings.Add($finding)
+            }
+            return @($findings)
           }
 
           function Get-Stats($rows) {
@@ -208,20 +290,122 @@ jobs:
             }
           }
 
-          $before = Get-Stats (Read-AnalyzerCsv $beforePath)
-          $after = Get-Stats (Read-AnalyzerCsv $afterPath)
+          function Count-By($items, [string]$property) {
+            $counts = @{}
+            foreach ($item in $items) {
+              $key = "$($item.$property)"
+              if ([string]::IsNullOrWhiteSpace($key)) {
+                $key = "(empty)"
+              }
+              if (-not $counts.ContainsKey($key)) {
+                $counts[$key] = 0
+              }
+              $counts[$key]++
+            }
+            return $counts
+          }
+
+          function Get-TopDelta($beforeCounts, $afterCounts, [int]$limit, [bool]$improved) {
+            $keys = @(@($beforeCounts.Keys) + @($afterCounts.Keys) | Sort-Object -Unique)
+            $rows = foreach ($key in $keys) {
+              $beforeValue = if ($beforeCounts.ContainsKey($key)) { $beforeCounts[$key] } else { 0 }
+              $afterValue = if ($afterCounts.ContainsKey($key)) { $afterCounts[$key] } else { 0 }
+              $deltaValue = $afterValue - $beforeValue
+              if (($improved -and $deltaValue -lt 0) -or (-not $improved -and $deltaValue -gt 0)) {
+                [PSCustomObject]@{
+                  name = $key
+                  before = $beforeValue
+                  after = $afterValue
+                  delta = $deltaValue
+                }
+              }
+            }
+
+            if ($improved) {
+              return @($rows | Sort-Object delta | Select-Object -First $limit)
+            }
+
+            return @($rows | Sort-Object delta -Descending | Select-Object -First $limit)
+          }
+
+          function Markdown-FindingTable($items) {
+            if (-not $items -or $items.Count -eq 0) {
+              return "_None._"
+            }
+
+            $lines = New-Object System.Collections.Generic.List[string]
+            $lines.Add("| Severity | Rule | Location | Message |")
+            $lines.Add("| --- | --- | --- | --- |")
+            foreach ($item in @($items | Select-Object -First 10)) {
+              $message = "$($item.message)" -replace '\|', '/' -replace "`r?`n", ' '
+              if ($message.Length -gt 140) {
+                $message = $message.Substring(0, 137) + "..."
+              }
+              $lines.Add("| $($item.severity) | `$($item.rule)` | `$($item.location)` | $message |")
+            }
+            return ($lines -join "`n")
+          }
+
+          function Markdown-DeltaTable($items) {
+            if (-not $items -or $items.Count -eq 0) {
+              return "_None._"
+            }
+
+            $lines = New-Object System.Collections.Generic.List[string]
+            $lines.Add("| Name | Before | After | Delta |")
+            $lines.Add("| --- | ---: | ---: | ---: |")
+            foreach ($item in $items) {
+              $lines.Add("| `$($item.name)` | $($item.before) | $($item.after) | $($item.delta) |")
+            }
+            return ($lines -join "`n")
+          }
+
+          $beforeFindings = Convert-Findings (Read-AnalyzerCsv $beforePath)
+          $afterFindings = Convert-Findings (Read-AnalyzerCsv $afterPath)
+
+          $before = Get-Stats $beforeFindings
+          $after = Get-Stats $afterFindings
+
+          $beforeKeys = @{}
+          foreach ($finding in $beforeFindings) {
+            $beforeKeys[$finding.key] = $finding
+          }
+
+          $afterKeys = @{}
+          foreach ($finding in $afterFindings) {
+            $afterKeys[$finding.key] = $finding
+          }
+
+          $newFindings = @($afterFindings | Where-Object { -not $beforeKeys.ContainsKey($_.key) })
+          $removedFindings = @($beforeFindings | Where-Object { -not $afterKeys.ContainsKey($_.key) })
+          $newHighOrCritical = @($newFindings | Where-Object { $_.severity -match '^\s*[12]\b|Critical|High' })
+
+          $ruleImprovements = Get-TopDelta (Count-By $beforeFindings "rule") (Count-By $afterFindings "rule") 10 $true
+          $ruleRegressions = Get-TopDelta (Count-By $beforeFindings "rule") (Count-By $afterFindings "rule") 10 $false
+          $fileImprovements = Get-TopDelta (Count-By $beforeFindings "normalizedLocation") (Count-By $afterFindings "normalizedLocation") 10 $true
+          $fileRegressions = Get-TopDelta (Count-By $beforeFindings "normalizedLocation") (Count-By $afterFindings "normalizedLocation") 10 $false
 
           $delta = [PSCustomObject]@{
             total = $after.total - $before.total
             critical = $after.critical - $before.critical
             high = $after.high - $before.high
             apiVersionRelated = $after.apiVersionRelated - $before.apiVersionRelated
+            newFindings = $newFindings.Count
+            removedFindings = $removedFindings.Count
+            newHighOrCritical = $newHighOrCritical.Count
           }
 
           $result = [PSCustomObject]@{
             before = $before
             after = $after
             delta = $delta
+            newFindings = @($newFindings | Select-Object -First 50)
+            removedFindings = @($removedFindings | Select-Object -First 50)
+            newHighOrCriticalFindings = @($newHighOrCritical | Select-Object -First 50)
+            ruleImprovements = $ruleImprovements
+            ruleRegressions = $ruleRegressions
+            fileImprovements = $fileImprovements
+            fileRegressions = $fileRegressions
             analyzerBeforeExitCode = "${{ steps.analyzer-before.outputs.exit_code }}"
             analyzerAfterExitCode = "${{ steps.analyzer-after.outputs.exit_code }}"
           }
@@ -243,23 +427,166 @@ jobs:
             "| Critical findings | $($before.critical) | $($after.critical) | $($delta.critical) |"
             "| High findings | $($before.high) | $($after.high) | $($delta.high) |"
             "| API version related findings | $($before.apiVersionRelated) | $($after.apiVersionRelated) | $($delta.apiVersionRelated) |"
+            "| New findings | 0 | $($delta.newFindings) | $($delta.newFindings) |"
+            "| Removed findings | $($delta.removedFindings) | 0 | -$($delta.removedFindings) |"
+            "| New High/Critical findings | 0 | $($delta.newHighOrCritical) | $($delta.newHighOrCritical) |"
             ""
             "## Decision"
             ""
-            $(if ($delta.critical -gt 0 -or $delta.high -gt 0) {
+            $(if ($delta.newHighOrCritical -gt 0) {
               "NOT SAFE: new high or critical findings appeared after the API version update."
             } elseif ($delta.apiVersionRelated -lt 0) {
               "PROMISING: API version related findings decreased and no new high/critical findings appeared."
             } else {
               "NEUTRAL: no API version related improvement detected, but no new high/critical findings appeared."
             })
+            ""
+            "## Removed Findings"
+            ""
+            (Markdown-FindingTable $removedFindings)
+            ""
+            "## New Findings"
+            ""
+            (Markdown-FindingTable $newFindings)
+            ""
+            "## New High/Critical Findings"
+            ""
+            (Markdown-FindingTable $newHighOrCritical)
+            ""
+            "## Rules Improved"
+            ""
+            (Markdown-DeltaTable $ruleImprovements)
+            ""
+            "## Rules Regressed"
+            ""
+            (Markdown-DeltaTable $ruleRegressions)
+            ""
+            "## Files Improved"
+            ""
+            (Markdown-DeltaTable $fileImprovements)
+            ""
+            "## Files Regressed"
+            ""
+            (Markdown-DeltaTable $fileRegressions)
           ) | Set-Content $summaryPath
+
+          $html = @"
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>API Version Upgrade Summary</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 24px; color: #1f2937; background: #f8fafc; }
+              main { max-width: 1120px; margin: 0 auto; background: white; border: 1px solid #d9e1ec; border-radius: 8px; padding: 24px; }
+              h1, h2 { margin-top: 0; }
+              table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; }
+              th, td { border: 1px solid #d9e1ec; padding: 8px 10px; text-align: left; vertical-align: top; }
+              th { background: #eef2f7; }
+              code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
+              .ok { color: #2e844a; font-weight: 700; }
+              .warn { color: #b45f06; font-weight: 700; }
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>API Version Upgrade Summary</h1>
+              <p><strong>Target API:</strong> <code>${{ inputs.target_api_version }}</code> | <strong>Target ref:</strong> <code>${{ inputs.target_ref }}</code></p>
+              <h2>Analyzer Delta</h2>
+              <table>
+                <tr><th>Metric</th><th>Before</th><th>After</th><th>Delta</th></tr>
+                <tr><td>Total</td><td>$($before.total)</td><td>$($after.total)</td><td>$($delta.total)</td></tr>
+                <tr><td>Critical</td><td>$($before.critical)</td><td>$($after.critical)</td><td>$($delta.critical)</td></tr>
+                <tr><td>High</td><td>$($before.high)</td><td>$($after.high)</td><td>$($delta.high)</td></tr>
+                <tr><td>API version related</td><td>$($before.apiVersionRelated)</td><td>$($after.apiVersionRelated)</td><td>$($delta.apiVersionRelated)</td></tr>
+                <tr><td>New High/Critical</td><td>0</td><td>$($delta.newHighOrCritical)</td><td>$($delta.newHighOrCritical)</td></tr>
+              </table>
+              <p class="$(if ($delta.newHighOrCritical -gt 0) { "warn" } else { "ok" })">Decision details are available in analyzer-comparison.md.</p>
+            </main>
+          </body>
+          </html>
+          "@
+          $html | Set-Content $htmlPath
 
           Get-Content $summaryPath
 
-          if ($delta.critical -gt 0 -or $delta.high -gt 0) {
+          if ($delta.newHighOrCritical -gt 0) {
             Write-Warning "New high or critical findings appeared after the API version update. Check the report before applying the patch."
           }
+
+      - name: Optional deploy validate
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          set +e
+
+          summary_path="${REPORT_DIR}/deploy-validate.md"
+          json_path="${REPORT_DIR}/deploy-validate.json"
+
+          if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+            {
+              echo "# Deploy Validate"
+              echo
+              echo "Skipped. Input run_deploy_validate was false."
+            } > "$summary_path"
+            exit 0
+          fi
+
+          if [ -z "${SF_AUTH_URL_API_GUARD}" ]; then
+            {
+              echo "# Deploy Validate"
+              echo
+              echo "Skipped. Secret SF_AUTH_URL_API_GUARD is not configured."
+            } > "$summary_path"
+            exit 0
+          fi
+
+          printf '%s' "${SF_AUTH_URL_API_GUARD}" > sf-auth-url-api-guard.txt
+          sf org login sfdx-url \
+            --sfdx-url-file sf-auth-url-api-guard.txt \
+            --alias api-version-guard \
+            --set-default
+          login_code=$?
+
+          if [ "$login_code" -ne 0 ]; then
+            {
+              echo "# Deploy Validate"
+              echo
+              echo "NOT SAFE: Salesforce authentication failed."
+            } > "$summary_path"
+            echo "{\"status\":\"auth_failed\"}" > "$json_path"
+            rm -f sf-auth-url-api-guard.txt
+            exit 0
+          fi
+
+          sf project deploy validate \
+            --source-dir "${{ inputs.source_dir }}" \
+            --target-org api-version-guard \
+            --test-level "${{ inputs.test_level }}" \
+            --json > "$json_path"
+          validate_code=$?
+
+          {
+            echo "# Deploy Validate"
+            echo
+            echo "- Enabled: true"
+            echo "- Test level: ${{ inputs.test_level }}"
+            echo "- Exit code: ${validate_code}"
+            echo
+            if [ "$validate_code" -eq 0 ]; then
+              echo "SAFE SIGNAL: deploy validate completed successfully."
+            else
+              echo "NOT SAFE SIGNAL: deploy validate failed. Inspect deploy-validate.json."
+            fi
+          } > "$summary_path"
+
+          rm -f sf-auth-url-api-guard.txt
+
+          if [ "$validate_code" -ne 0 ]; then
+            echo "Deploy validate failed. Check artifact deploy-validate.json."
+          fi
 
       - name: List generated reports
         if: ${{ always() }}
@@ -277,9 +604,16 @@ jobs:
             project/docs/api-version-upgrade-guard/api-version-upgrade-report.md
             project/docs/api-version-upgrade-guard/api-version-upgrade-report.json
             project/docs/api-version-upgrade-guard/api-version-upgrade.patch
+            project/docs/api-version-upgrade-guard/api-version-upgrade-full.patch
+            project/docs/api-version-upgrade-guard/api-version-upgrade-real.patch
             project/docs/api-version-upgrade-guard/changed-files.txt
+            project/docs/api-version-upgrade-guard/diff-validation.txt
+            project/docs/api-version-upgrade-guard/invalid-diff.txt
             project/docs/api-version-upgrade-guard/analyzer-before.csv
             project/docs/api-version-upgrade-guard/analyzer-after.csv
             project/docs/api-version-upgrade-guard/analyzer-comparison.md
             project/docs/api-version-upgrade-guard/analyzer-comparison.json
+            project/docs/api-version-upgrade-guard/api-version-upgrade-summary.html
+            project/docs/api-version-upgrade-guard/deploy-validate.md
+            project/docs/api-version-upgrade-guard/deploy-validate.json
           if-no-files-found: warn
