@@ -81,6 +81,77 @@ jobs:
           mkdir -p "${REPORT_DIR}"
           rm -f "${REPORT_DIR}"/*
 
+      - name: Install project style dependencies
+        id: project-deps
+        shell: bash
+        working-directory: project
+        run: |
+          report_md="${REPORT_DIR}/style-dependencies-report.md"
+          report_json="${REPORT_DIR}/style-dependencies-report.json"
+
+          if [ ! -f package.json ]; then
+            {
+              echo "# Style Dependencies"
+              echo
+              echo "- Status: skipped"
+              echo "- Reason: package.json was not found"
+            } > "$report_md"
+            echo '{"installed":false,"status":"skipped_no_package_json","exitCode":0}' > "$report_json"
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "Style dependency install skipped. package.json was not found."
+            exit 0
+          fi
+
+          set +e
+          npm install --no-save --no-package-lock
+          install_code=$?
+
+          if [ "$install_code" -eq 0 ]; then
+            status="completed"
+            installed="true"
+          else
+            status="npm_install_failed"
+            installed="false"
+          fi
+
+          {
+            echo "# Style Dependencies"
+            echo
+            echo "- Status: ${status}"
+            echo "- Exit code: ${install_code}"
+          } > "$report_md"
+
+          echo "{\"installed\":${installed},\"status\":\"${status}\",\"exitCode\":${install_code}}" > "$report_json"
+          echo "installed=${installed}" >> "$GITHUB_OUTPUT"
+          echo "Style dependency install status: ${status}. Exit code: ${install_code}."
+          exit 0
+
+      - name: Run style checks before cleanup
+        shell: bash
+        working-directory: project
+        run: |
+          prettier_log="${REPORT_DIR}/prettier-before.txt"
+          eslint_log="${REPORT_DIR}/eslint-before.txt"
+          report_json="${REPORT_DIR}/style-checks-before.json"
+
+          if [ "${{ steps.project-deps.outputs.installed }}" != "true" ]; then
+            echo "Style checks before cleanup skipped because dependencies were not installed." > "$prettier_log"
+            echo "Style checks before cleanup skipped because dependencies were not installed." > "$eslint_log"
+            echo '{"prettierExitCode":0,"eslintExitCode":0,"status":"skipped_no_dependencies"}' > "$report_json"
+            exit 0
+          fi
+
+          set +e
+          npm run prettier:verify > "$prettier_log" 2>&1
+          prettier_code=$?
+
+          npm run lint > "$eslint_log" 2>&1
+          eslint_code=$?
+
+          echo "{\"prettierExitCode\":${prettier_code},\"eslintExitCode\":${eslint_code},\"status\":\"completed\"}" > "$report_json"
+          echo "Style checks before cleanup completed. Prettier exit code: ${prettier_code}. ESLint exit code: ${eslint_code}."
+          exit 0
+
       - name: Run analyzer before cleanup
         id: analyzer-before
         continue-on-error: true
@@ -142,23 +213,21 @@ jobs:
             exit 0
           fi
 
-          set +e
-          npm install --no-save --no-package-lock
-          install_code=$?
-
-          if [ "$install_code" -ne 0 ]; then
+          if [ "${{ steps.project-deps.outputs.installed }}" != "true" ]; then
             {
               echo "# Formatting Cleanup"
               echo
               echo "- Mode: format"
-              echo "- Status: npm install failed"
-              echo "- Exit code: ${install_code}"
+              echo "- Status: skipped"
+              echo
+              echo "Project style dependencies were not installed."
             } > "$report_md"
-            echo "{\"mode\":\"format\",\"enabled\":true,\"status\":\"npm_install_failed\",\"exitCode\":${install_code}}" > "$report_json"
-            echo "Formatting cleanup failed during npm install."
+            echo '{"mode":"format","enabled":true,"status":"skipped_no_dependencies","exitCode":0}' > "$report_json"
+            echo "Formatting cleanup skipped. Project style dependencies were not installed."
             exit 0
           fi
 
+          set +e
           npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
           prettier_code=$?
 
@@ -181,12 +250,53 @@ jobs:
           echo "Formatting cleanup status: ${status}. Prettier exit code: ${prettier_code}."
           exit 0
 
+      - name: Run style checks after cleanup
+        shell: bash
+        working-directory: project
+        run: |
+          prettier_log="${REPORT_DIR}/prettier-after.txt"
+          eslint_log="${REPORT_DIR}/eslint-after.txt"
+          report_json="${REPORT_DIR}/style-checks-after.json"
+
+          if [ "${{ steps.project-deps.outputs.installed }}" != "true" ]; then
+            echo "Style checks after cleanup skipped because dependencies were not installed." > "$prettier_log"
+            echo "Style checks after cleanup skipped because dependencies were not installed." > "$eslint_log"
+            echo '{"prettierExitCode":0,"eslintExitCode":0,"status":"skipped_no_dependencies"}' > "$report_json"
+            exit 0
+          fi
+
+          set +e
+          npm run prettier:verify > "$prettier_log" 2>&1
+          prettier_code=$?
+
+          npm run lint > "$eslint_log" 2>&1
+          eslint_code=$?
+
+          echo "{\"prettierExitCode\":${prettier_code},\"eslintExitCode\":${eslint_code},\"status\":\"completed\"}" > "$report_json"
+          echo "Style checks after cleanup completed. Prettier exit code: ${prettier_code}. ESLint exit code: ${eslint_code}."
+          exit 0
+
       - name: Save cleanup patch
         shell: bash
         working-directory: project
         run: |
           git diff --name-only > "${REPORT_DIR}/changed-files.txt"
           git diff > "${REPORT_DIR}/basic-code-cleanup.patch"
+          git diff --stat > "${REPORT_DIR}/basic-code-cleanup.diffstat"
+          git diff --numstat > "${REPORT_DIR}/basic-code-cleanup.numstat"
+          awk '
+            BEGIN { files=0; insertions=0; deletions=0 }
+            {
+              files += 1
+              if ($1 ~ /^[0-9]+$/) insertions += $1
+              if ($2 ~ /^[0-9]+$/) deletions += $2
+            }
+            END {
+              print "diff_files=" files
+              print "diff_insertions=" insertions
+              print "diff_deletions=" deletions
+            }
+          ' "${REPORT_DIR}/basic-code-cleanup.numstat" > "${REPORT_DIR}/diff-summary.env"
 
       - name: Run analyzer after cleanup
         id: analyzer-after
@@ -227,7 +337,10 @@ jobs:
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
           formatting_json="${REPORT_DIR}/formatting-report.json"
+          style_before_json="${REPORT_DIR}/style-checks-before.json"
+          style_after_json="${REPORT_DIR}/style-checks-after.json"
           summary_file="${REPORT_DIR}/comparison-summary.env"
+          diff_summary_file="${REPORT_DIR}/diff-summary.env"
 
           if [ -f "$cleanup_json" ]; then
             changed_files="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.changedFiles || 0)" "$cleanup_json")"
@@ -247,10 +360,36 @@ jobs:
             formatter_exit_code=0
           fi
 
+          if [ -f "$style_before_json" ]; then
+            prettier_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.prettierExitCode ?? 0)" "$style_before_json")"
+            eslint_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintExitCode ?? 0)" "$style_before_json")"
+          else
+            prettier_before=0
+            eslint_before=0
+          fi
+
+          if [ -f "$style_after_json" ]; then
+            prettier_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.prettierExitCode ?? 0)" "$style_after_json")"
+            eslint_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintExitCode ?? 0)" "$style_after_json")"
+          else
+            prettier_after=0
+            eslint_after=0
+          fi
+
           if [ -f "$summary_file" ]; then
             set -a
             . "$summary_file"
             set +a
+          fi
+
+          if [ -f "$diff_summary_file" ]; then
+            set -a
+            . "$diff_summary_file"
+            set +a
+          else
+            diff_files=0
+            diff_insertions=0
+            diff_deletions=0
           fi
 
           if [ "${fixed_findings:-0}" -gt 0 ]; then
@@ -271,9 +410,14 @@ jobs:
           echo "Final newlines added: ${final_newlines}"
           echo "Formatter status: ${formatter_status}"
           echo "Formatter exit code: ${formatter_exit_code}"
+          echo "Prettier verify exit code: ${prettier_before} -> ${prettier_after}"
+          echo "ESLint exit code: ${eslint_before} -> ${eslint_after}"
+          echo "Patch files changed: ${diff_files}"
+          echo "Patch insertions: ${diff_insertions}"
+          echo "Patch deletions: ${diff_deletions}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "New High/Critical findings: ${new_high_or_critical:-0}"
-          echo "::notice title=Basic cleanup insight::${analyzer_insight} Files changed: ${changed_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. Findings: ${total_before:-0} -> ${total_after:-0}."
+          echo "::notice title=Basic cleanup insight::${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. Prettier: ${prettier_before}->${prettier_after}. ESLint: ${eslint_before}->${eslint_after}. Analyzer: ${total_before:-0}->${total_after:-0}."
 
           {
             echo "## Basic Code Cleanup Insight"
@@ -288,6 +432,13 @@ jobs:
             echo "| Final newlines added | ${final_newlines} |"
             echo "| Formatter status | ${formatter_status} |"
             echo "| Formatter exit code | ${formatter_exit_code} |"
+            echo "| Prettier verify exit code before | ${prettier_before} |"
+            echo "| Prettier verify exit code after | ${prettier_after} |"
+            echo "| ESLint exit code before | ${eslint_before} |"
+            echo "| ESLint exit code after | ${eslint_after} |"
+            echo "| Patch files changed | ${diff_files} |"
+            echo "| Patch insertions | ${diff_insertions} |"
+            echo "| Patch deletions | ${diff_deletions} |"
             echo "| Analyzer findings before | ${total_before:-0} |"
             echo "| Analyzer findings after | ${total_after:-0} |"
             echo "| New High/Critical findings | ${new_high_or_critical:-0} |"
@@ -310,9 +461,20 @@ jobs:
           path: |
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json
+            project/docs/basic-code-cleanup-guard/style-dependencies-report.md
+            project/docs/basic-code-cleanup-guard/style-dependencies-report.json
             project/docs/basic-code-cleanup-guard/formatting-report.md
             project/docs/basic-code-cleanup-guard/formatting-report.json
+            project/docs/basic-code-cleanup-guard/prettier-before.txt
+            project/docs/basic-code-cleanup-guard/prettier-after.txt
+            project/docs/basic-code-cleanup-guard/eslint-before.txt
+            project/docs/basic-code-cleanup-guard/eslint-after.txt
+            project/docs/basic-code-cleanup-guard/style-checks-before.json
+            project/docs/basic-code-cleanup-guard/style-checks-after.json
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.patch
+            project/docs/basic-code-cleanup-guard/basic-code-cleanup.diffstat
+            project/docs/basic-code-cleanup-guard/basic-code-cleanup.numstat
+            project/docs/basic-code-cleanup-guard/diff-summary.env
             project/docs/basic-code-cleanup-guard/changed-files.txt
             project/docs/basic-code-cleanup-guard/analyzer-before.csv
             project/docs/basic-code-cleanup-guard/analyzer-after.csv
