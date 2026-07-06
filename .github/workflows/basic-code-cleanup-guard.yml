@@ -744,6 +744,23 @@ jobs:
         run: |
           find docs/basic-code-cleanup-guard -maxdepth 1 -type f -print | sort || true
 
+      - name: Sanitize report paths
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          export PROJECT_ROOT="$(pwd)"
+          export WORKSPACE_ROOT="${GITHUB_WORKSPACE}"
+
+          find "${REPORT_DIR}" -type f \( \
+            -name "*.csv" -o \
+            -name "*.json" -o \
+            -name "*.md" -o \
+            -name "*.txt" \
+          \) -print0 | while IFS= read -r -d '' file; do
+            perl -0pi -e 's#\Q$ENV{PROJECT_ROOT}\E/?##g; s#\Q$ENV{WORKSPACE_ROOT}\E/?##g' "$file"
+          done
+
       - name: Upload basic cleanup artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
