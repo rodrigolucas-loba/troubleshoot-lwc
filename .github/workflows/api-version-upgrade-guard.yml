@@ -1,4 +1,5 @@
 name: API Version Upgrade Guard
+run-name: "API version guard (${{ inputs.target_api_version }})"
 
 on:
   workflow_dispatch:
@@ -16,7 +17,7 @@ on:
       target_ref:
         description: "Branch or ref containing the Salesforce project to test"
         required: true
-        default: "monitoring_loba_b_dev_ed_develop"
+        default: "main"
         type: string
 
 permissions:
@@ -196,14 +197,14 @@ jobs:
             --after "${REPORT_DIR}/analyzer-after.csv" \
             --out-dir "${REPORT_DIR}" \
             --target-api "${{ inputs.target_api_version }}" \
-            --target-ref "${{ inputs.target_ref }}" \
+            --target-ref "<target-ref>" \
             --source-dir "${{ inputs.source_dir }}" \
             --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
             --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
 
           cat "${REPORT_DIR}/analyzer-comparison.md"
 
-      - name: Publish basic upgrade insight
+      - name: Publish API version run result
         if: ${{ always() }}
         shell: bash
         working-directory: project
@@ -212,9 +213,9 @@ jobs:
 
           if [ ! -f "$summary_file" ]; then
             {
-              echo "## API Version Upgrade Insight"
+              echo "## Resultado do versionamento de API"
               echo
-              echo "Comparison summary was not generated. Check previous steps."
+              echo "A comparação antes/depois não foi gerada. Rever os steps anteriores."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -223,35 +224,49 @@ jobs:
           . "$summary_file"
           set +a
 
-          if [ "${fixed_findings:-0}" -gt 0 ]; then
-            if [ "${fixed_findings:-0}" -eq 1 ]; then
-              insight="Fixed 1 analyzer finding."
-            else
-              insight="Fixed ${fixed_findings} analyzer findings."
-            fi
-          elif [ "${new_findings:-0}" -gt 0 ]; then
-            if [ "${new_findings:-0}" -eq 1 ]; then
-              insight="No findings were fixed and 1 new finding appeared."
-            else
-              insight="No findings were fixed and ${new_findings} new findings appeared."
-            fi
+          if [ "${new_high_or_critical:-0}" -gt 0 ]; then
+            decision="NÃO APLICAR"
+            reason="Surgiram novos findings High/Critical depois da alteração."
+          elif [ "${api_version_fixed:-0}" -gt 0 ]; then
+            decision="REVER PATCH"
+            reason="Findings relacionados com API version reduziram neste run."
+          elif [ "${fixed_findings:-0}" -gt 0 ]; then
+            decision="REVER PATCH"
+            reason="Findings do Analyzer reduziram neste run."
           else
-            insight="No analyzer findings were fixed by this API version update."
+            decision="SEM AÇÃO"
+            reason="Não houve redução de findings neste run."
           fi
 
+          echo "Resultado do versionamento de API"
+          echo "Decisão: ${decision}"
+          echo "Motivo: ${reason}"
+          echo "API version findings: ${api_version_before:-0} -> ${api_version_after:-0}"
+          echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
+          echo "Novos High/Critical: ${new_high_or_critical:-0}"
+          echo "::notice title=Resultado API version::${decision}. ${reason} API version: ${api_version_before:-0}->${api_version_after:-0}. Analyzer: ${total_before:-0}->${total_after:-0}. Novos High/Critical: ${new_high_or_critical:-0}."
+
           {
-            echo "## API Version Upgrade Insight"
+            echo "## Resultado do versionamento de API"
             echo
-            echo "**${insight}**"
+            echo "### Decisão"
             echo
-            echo "| Metric | Before | After | Delta |"
-            echo "| --- | ---: | ---: | ---: |"
-            echo "| Total findings | ${total_before:-0} | ${total_after:-0} | ${total_delta:-0} |"
-            echo "| API version findings | ${api_version_before:-0} | ${api_version_after:-0} | -${api_version_fixed:-0} fixed |"
-            echo "| New findings | 0 | ${new_findings:-0} | +${new_findings:-0} |"
-            echo "| New High/Critical findings | 0 | ${new_high_or_critical:-0} | +${new_high_or_critical:-0} |"
+            echo "**${decision}**"
             echo
-            echo "Detailed reports are available in the uploaded artifact."
+            echo "${reason}"
+            echo
+            echo "| Métrica | Antes | Depois |"
+            echo "| --- | ---: | ---: |"
+            echo "| API version findings | ${api_version_before:-0} | ${api_version_after:-0} |"
+            echo "| Analyzer findings | ${total_before:-0} | ${total_after:-0} |"
+            echo "| Novos findings | 0 | ${new_findings:-0} |"
+            echo "| Novos High/Critical | 0 | ${new_high_or_critical:-0} |"
+            echo
+            echo "### Patch"
+            echo
+            echo "- O workflow gera apenas patch para review."
+            echo "- Não faz commit, push, merge nem altera a branch alvo."
+            echo "- O resultado compara apenas o estado antes/depois do run atual. Não usa API externa nem histórico entre runs."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: List generated reports
@@ -260,6 +275,24 @@ jobs:
         working-directory: project
         run: |
           find docs/api-version-upgrade-guard -maxdepth 1 -type f -print | sort || true
+
+      - name: Sanitize report paths
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          export PROJECT_ROOT="$(pwd)"
+          export WORKSPACE_ROOT="${GITHUB_WORKSPACE}"
+
+          find "${REPORT_DIR}" -type f \( \
+            -name "*.csv" -o \
+            -name "*.json" -o \
+            -name "*.md" -o \
+            -name "*.txt" -o \
+            -name "*.html" \
+          \) -print0 | while IFS= read -r -d '' file; do
+            perl -0pi -e 's#\Q$ENV{PROJECT_ROOT}\E/?##g; s#\Q$ENV{WORKSPACE_ROOT}\E/?##g' "$file"
+          done
 
       - name: Upload API version guard artifacts
         if: ${{ always() }}
