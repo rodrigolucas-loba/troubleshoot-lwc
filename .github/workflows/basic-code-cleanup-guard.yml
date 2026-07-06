@@ -412,7 +412,7 @@ jobs:
 
           cat "${REPORT_DIR}/analyzer-comparison.md"
 
-      - name: Publish basic cleanup insight
+      - name: Publish cleanup run result
         if: ${{ always() }}
         shell: bash
         working-directory: project
@@ -500,9 +500,9 @@ jobs:
           fi
 
           if [ "${fixed_findings:-0}" -gt 0 ]; then
-            analyzer_insight="Analyzer findings decreased after cleanup."
+            analyzer_result="Analyzer: findings reduziram neste run."
           else
-            analyzer_insight="Analyzer findings did not decrease after cleanup."
+            analyzer_result="Analyzer: findings nao reduziram neste run."
           fi
 
           prettier_fixed=$((prettier_warnings_before - prettier_warnings_after))
@@ -525,35 +525,35 @@ jobs:
           fi
 
           {
-            echo "# Cleanup Classification"
+            echo "# Classificacao da limpeza"
             echo
-            echo "## Auto-fixed"
+            echo "## Corrigido automaticamente"
             echo
             if [ "${prettier_fixed}" -gt 0 ]; then
-              echo "- Prettier formatting/code style warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}** (${prettier_fixed} fixed)"
+              echo "- Warnings de formatacao Prettier: **${prettier_warnings_before} -> ${prettier_warnings_after}** (${prettier_fixed} corrigidos)"
             else
-              echo "- Prettier formatting/code style warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
+              echo "- Warnings de formatacao Prettier: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
             fi
-            echo "- Trailing whitespace lines removed: **${trailing_fixed}**"
-            echo "- Final newlines added: **${final_newlines}**"
-            echo "- Analyzer findings trend: **${total_before:-0} -> ${total_after:-0}**"
+            echo "- Linhas com whitespace final removido: **${trailing_fixed}**"
+            echo "- Final newlines adicionadas: **${final_newlines}**"
+            echo "- Findings do Analyzer: **${total_before:-0} -> ${total_after:-0}**"
             if [ "${eslint_fixed}" -gt 0 ]; then
-              echo "- ESLint auto-fix problems reduced: **${eslint_problems_before} -> ${eslint_problems_after}** (${eslint_fixed} fixed)"
+              echo "- Problemas ESLint reduzidos por auto-fix: **${eslint_problems_before} -> ${eslint_problems_after}** (${eslint_fixed} corrigidos)"
             else
-              echo "- ESLint auto-fix problems reduced: **${eslint_problems_before} -> ${eslint_problems_after}**"
+              echo "- Problemas ESLint reduzidos por auto-fix: **${eslint_problems_before} -> ${eslint_problems_after}**"
             fi
-            echo "- ESLint auto-fix status: **${eslint_fix_status}**"
-            echo "- Patch generated for review: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
+            echo "- Estado do ESLint auto-fix: **${eslint_fix_status}**"
+            echo "- Patch gerado para review: **${diff_files} ficheiros**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
             echo
-            echo "## Still needs manual or code-aware fix"
+            echo "## Ainda precisa de review manual"
             echo
-            echo "- ESLint problems remaining: **${eslint_remaining}** (${eslint_errors_after} errors, ${eslint_warnings_after} warnings)"
-            echo "- Analyzer findings remaining: **${analyzer_remaining}**"
-            echo "- New High/Critical findings introduced: **${new_high_or_critical:-0}**"
+            echo "- Problemas ESLint restantes: **${eslint_remaining}** (${eslint_errors_after} errors, ${eslint_warnings_after} warnings)"
+            echo "- Findings Analyzer restantes: **${analyzer_remaining}**"
+            echo "- Novos High/Critical introduzidos: **${new_high_or_critical:-0}**"
             echo
-            echo "## How to read these metrics"
+            echo "## Nota"
             echo
-            echo "Analyzer findings, Prettier warnings, and ESLint problems are separate quality signals. Formatting and indentation are measured by Prettier. Some analyzer rules can be reduced by formatting cleanup, but many code-aware issues require human review. ESLint --fix only applies fixes that the configured rules mark as automatically safe."
+            echo "Este resultado compara apenas o estado antes/depois do run atual. Nao usa API externa nem historico entre runs."
           } > "$classification_md"
 
           {
@@ -613,7 +613,7 @@ jobs:
                 recommendation: process.argv[19],
                 reason: process.argv[20]
               },
-              explanation: 'Analyzer findings, Prettier warnings, and ESLint problems are separate quality signals. Formatting can be auto-fixed; code-aware issues require review.'
+              explanation: 'Resultado calculado apenas pela comparacao antes/depois do run atual. Nao usa API externa nem historico entre runs.'
             };
             fs.writeFileSync(process.argv[21], JSON.stringify(data, null, 2) + '\n');
           " \
@@ -639,78 +639,43 @@ jobs:
             "${operator_reason}" \
             "$classification_json"
 
-          echo "Basic Code Cleanup Insight"
-          echo "Operator decision: ${operator_decision}"
-          echo "Decision reason: ${operator_reason}"
-          echo "${analyzer_insight}"
-          echo "Cleanup mode: ${{ inputs.cleanup_mode }}"
-          echo "Files changed by cleanup: ${changed_files}"
-          echo "Trailing whitespace lines fixed: ${trailing_fixed}"
-          echo "Final newlines added: ${final_newlines}"
-          echo "Formatter status: ${formatter_status}"
-          echo "Formatter exit code: ${formatter_exit_code}"
-          echo "ESLint auto-fix status: ${eslint_fix_status}"
-          echo "ESLint auto-fix exit code: ${eslint_fix_exit_code}"
-          echo "Prettier verify exit code: ${prettier_before} -> ${prettier_after}"
+          echo "Resultado da limpeza"
+          echo "Decisao: ${operator_decision}"
+          echo "Motivo: ${operator_reason}"
+          echo "${analyzer_result}"
+          echo "Modo: ${{ inputs.cleanup_mode }}"
+          echo "Patch: ${diff_files} ficheiros"
           echo "Prettier warnings: ${prettier_warnings_before} -> ${prettier_warnings_after}"
-          echo "ESLint exit code: ${eslint_before} -> ${eslint_after}"
           echo "ESLint problems: ${eslint_problems_before} -> ${eslint_problems_after}"
-          echo "ESLint errors: ${eslint_errors_before} -> ${eslint_errors_after}"
-          echo "ESLint warnings: ${eslint_warnings_before} -> ${eslint_warnings_after}"
-          echo "Patch files changed: ${diff_files}"
-          echo "Patch insertions: ${diff_insertions}"
-          echo "Patch deletions: ${diff_deletions}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
-          echo "New High/Critical findings: ${new_high_or_critical:-0}"
-          echo "::notice title=Basic cleanup insight::${operator_decision}. ${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Formatter: ${formatter_status}. ESLint fix: ${eslint_fix_status}. Prettier warnings: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint problems: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
+          echo "Novos High/Critical: ${new_high_or_critical:-0}"
+          echo "::notice title=Resultado da limpeza::${operator_decision}. ${analyzer_result} Patch: ${diff_files} ficheiros. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. Novos High/Critical: ${new_high_or_critical:-0}."
 
           {
-            echo "## Basic Code Cleanup Insight"
+            echo "## Resultado da limpeza"
             echo
-            echo "### Operator decision"
+            echo "### Decisao"
             echo
             echo "**${operator_decision}**"
             echo
             echo "${operator_reason}"
             echo
-            echo "**${analyzer_insight}**"
+            echo "**${analyzer_result}**"
             echo
-            echo "| Metric | Count |"
-            echo "| --- | ---: |"
-            echo "| Cleanup mode | ${{ inputs.cleanup_mode }} |"
-            echo "| Operator decision | ${operator_decision} |"
-            echo "| Files changed by cleanup | ${changed_files} |"
-            echo "| Trailing whitespace lines fixed | ${trailing_fixed} |"
-            echo "| Final newlines added | ${final_newlines} |"
-            echo "| Formatter status | ${formatter_status} |"
-            echo "| Formatter exit code | ${formatter_exit_code} |"
-            echo "| ESLint auto-fix status | ${eslint_fix_status} |"
-            echo "| ESLint auto-fix exit code | ${eslint_fix_exit_code} |"
-            echo "| Prettier verify exit code before | ${prettier_before} |"
-            echo "| Prettier verify exit code after | ${prettier_after} |"
-            echo "| Prettier warnings before | ${prettier_warnings_before} |"
-            echo "| Prettier warnings after | ${prettier_warnings_after} |"
-            echo "| ESLint exit code before | ${eslint_before} |"
-            echo "| ESLint exit code after | ${eslint_after} |"
-            echo "| ESLint problems before | ${eslint_problems_before} |"
-            echo "| ESLint problems after | ${eslint_problems_after} |"
-            echo "| ESLint problems fixed | ${eslint_fixed} |"
-            echo "| ESLint errors before | ${eslint_errors_before} |"
-            echo "| ESLint errors after | ${eslint_errors_after} |"
-            echo "| ESLint warnings before | ${eslint_warnings_before} |"
-            echo "| ESLint warnings after | ${eslint_warnings_after} |"
-            echo "| Patch files changed | ${diff_files} |"
-            echo "| Patch insertions | ${diff_insertions} |"
-            echo "| Patch deletions | ${diff_deletions} |"
-            echo "| Analyzer findings before | ${total_before:-0} |"
-            echo "| Analyzer findings after | ${total_after:-0} |"
-            echo "| New High/Critical findings | ${new_high_or_critical:-0} |"
+            echo "| Metrica | Antes | Depois |"
+            echo "| --- | ---: | ---: |"
+            echo "| Prettier warnings | ${prettier_warnings_before} | ${prettier_warnings_after} |"
+            echo "| ESLint problems | ${eslint_problems_before} | ${eslint_problems_after} |"
+            echo "| Analyzer findings | ${total_before:-0} | ${total_after:-0} |"
+            echo "| Novos High/Critical | 0 | ${new_high_or_critical:-0} |"
             echo
-            cat "$classification_md"
+            echo "### Patch"
+            echo
+            echo "- Ficheiros alterados: **${diff_files}**"
+            echo "- Whitespace final removido: **${trailing_fixed}**"
+            echo "- Final newlines adicionadas: **${final_newlines}**"
             echo
             cat "$operator_guide_md"
-            echo
-            echo "The cleanup is not committed automatically. Apply the uploaded patch only after review."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: List generated reports
