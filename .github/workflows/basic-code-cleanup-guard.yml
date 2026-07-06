@@ -502,7 +502,7 @@ jobs:
           if [ "${fixed_findings:-0}" -gt 0 ]; then
             analyzer_result="Analyzer: findings reduziram neste run."
           else
-            analyzer_result="Analyzer: findings nao reduziram neste run."
+            analyzer_result="Analyzer: findings não reduziram neste run."
           fi
 
           prettier_fixed=$((prettier_warnings_before - prettier_warnings_after))
@@ -514,25 +514,25 @@ jobs:
           operator_guide_md="${REPORT_DIR}/resumo-operacional.md"
 
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
-            operator_decision="NAO APLICAR"
+            operator_decision="NÃO APLICAR"
             operator_reason="Surgiram novos findings High/Critical depois da limpeza."
           elif [ "${diff_files}" -gt 0 ]; then
             operator_decision="REVER PATCH"
             operator_reason="O workflow gerou um patch de limpeza para rever antes de criar PR."
           else
-            operator_decision="SEM ACAO"
-            operator_reason="Nao foi gerado patch de limpeza."
+            operator_decision="SEM AÇÃO"
+            operator_reason="Não foi gerado patch de limpeza."
           fi
 
           {
-            echo "# Classificacao da limpeza"
+            echo "# Classificação da limpeza"
             echo
             echo "## Corrigido automaticamente"
             echo
             if [ "${prettier_fixed}" -gt 0 ]; then
-              echo "- Warnings de formatacao Prettier: **${prettier_warnings_before} -> ${prettier_warnings_after}** (${prettier_fixed} corrigidos)"
+              echo "- Warnings de formatação Prettier: **${prettier_warnings_before} -> ${prettier_warnings_after}** (${prettier_fixed} corrigidos)"
             else
-              echo "- Warnings de formatacao Prettier: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
+              echo "- Warnings de formatação Prettier: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
             fi
             echo "- Linhas com whitespace final removido: **${trailing_fixed}**"
             echo "- Final newlines adicionadas: **${final_newlines}**"
@@ -553,15 +553,15 @@ jobs:
             echo
             echo "## Nota"
             echo
-            echo "Este resultado compara apenas o estado antes/depois do run atual. Nao usa API externa nem historico entre runs."
+            echo "Este resultado compara apenas o estado antes/depois do run atual. Não usa API externa nem histórico entre runs."
           } > "$classification_md"
 
           {
             echo "# Resumo operacional"
             echo
-            echo "## Decisao"
+            echo "## Decisão"
             echo
-            echo "- Recomendacao: **${operator_decision}**"
+            echo "- Recomendação: **${operator_decision}**"
             echo "- Motivo: ${operator_reason}"
             echo "- Modo: \`${{ inputs.cleanup_mode }}\`"
             echo
@@ -569,9 +569,9 @@ jobs:
             echo
             echo "- Gerou apenas um patch para review."
             echo "- Correu Analyzer, Prettier e ESLint antes/depois."
-            echo "- Nao fez commit, push, merge nem alterou a branch alvo."
+            echo "- Não fez commit, push, merge nem alterou a branch alvo."
             echo
-            echo "## Leitura rapida"
+            echo "## Leitura rápida"
             echo
             echo "- \`safe\`: whitespace e final newline."
             echo "- \`format\`: safe + Prettier."
@@ -580,7 +580,7 @@ jobs:
             echo "## Antes de aplicar"
             echo
             echo "- Rever o patch gerado no artifact."
-            echo "- Confirmar que nao surgiram novos High/Critical."
+            echo "- Confirmar que não surgiram novos High/Critical."
             echo "- Tratar problemas ESLint restantes como trabalho separado."
           } > "$operator_guide_md"
 
@@ -613,7 +613,7 @@ jobs:
                 recommendation: process.argv[19],
                 reason: process.argv[20]
               },
-              explanation: 'Resultado calculado apenas pela comparacao antes/depois do run atual. Nao usa API externa nem historico entre runs.'
+              explanation: 'Resultado calculado apenas pela comparação antes/depois do run atual. Não usa API externa nem histórico entre runs.'
             };
             fs.writeFileSync(process.argv[21], JSON.stringify(data, null, 2) + '\n');
           " \
@@ -640,7 +640,7 @@ jobs:
             "$classification_json"
 
           echo "Resultado da limpeza"
-          echo "Decisao: ${operator_decision}"
+          echo "Decisão: ${operator_decision}"
           echo "Motivo: ${operator_reason}"
           echo "${analyzer_result}"
           echo "Modo: ${{ inputs.cleanup_mode }}"
@@ -654,7 +654,7 @@ jobs:
           {
             echo "## Resultado da limpeza"
             echo
-            echo "### Decisao"
+            echo "### Decisão"
             echo
             echo "**${operator_decision}**"
             echo
