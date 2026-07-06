@@ -511,7 +511,7 @@ jobs:
           analyzer_remaining="${total_after:-0}"
           classification_md="${REPORT_DIR}/cleanup-classification.md"
           classification_json="${REPORT_DIR}/cleanup-classification.json"
-          operator_guide_md="${REPORT_DIR}/operator-guide.md"
+          operator_guide_md="${REPORT_DIR}/resumo-operacional.md"
 
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
             operator_decision="DO NOT APPLY"
@@ -557,55 +557,31 @@ jobs:
           } > "$classification_md"
 
           {
-            echo "# Basic Code Cleanup Guard Operator Guide"
+            echo "# Resumo operacional"
             echo
-            echo "## Decision"
+            echo "## Decisao"
             echo
-            echo "- Recommendation: **${operator_decision}**"
-            echo "- Reason: ${operator_reason}"
-            echo "- Cleanup mode: \`${{ inputs.cleanup_mode }}\`"
-            echo "- Target ref: provided at workflow dispatch"
-            echo "- Source dir: provided at workflow dispatch"
+            echo "- Recomendacao: **${operator_decision}**"
+            echo "- Motivo: ${operator_reason}"
+            echo "- Modo: \`${{ inputs.cleanup_mode }}\`"
             echo
-            echo "## What this run did"
+            echo "## O que foi feito"
             echo
-            echo "- Generated a reviewable patch only; it did not commit, push, merge, or modify the target branch."
-            echo "- Ran Salesforce Code Analyzer before and after cleanup."
-            echo "- Ran Prettier checks before and after cleanup."
-            echo "- Ran ESLint checks before and after cleanup."
-            echo "- Uploaded all reports and the patch as an artifact."
+            echo "- Gerou apenas um patch para review."
+            echo "- Correu Analyzer, Prettier e ESLint antes/depois."
+            echo "- Nao fez commit, push, merge nem alterou a branch alvo."
             echo
-            echo "## Mode guide"
+            echo "## Leitura rapida"
             echo
-            echo "- \`safe\`: lowest risk; removes trailing whitespace and adds missing final newlines."
-            echo "- \`format\`: recommended for most cleanup reviews; runs safe cleanup plus Prettier formatting."
-            echo "- \`format_lintfix\`: most aggressive; runs format plus ESLint --fix, still requiring patch review."
+            echo "- \`safe\`: whitespace e final newline."
+            echo "- \`format\`: safe + Prettier."
+            echo "- \`format_lintfix\`: format + ESLint --fix."
             echo
-            echo "## Apply patch manually"
+            echo "## Antes de aplicar"
             echo
-            echo "\`\`\`powershell"
-            echo "cd <local-repository-path>"
-            echo "gh run download <run-id> --repo <owner>/<repository> --name <artifact-name> --dir cleanup-artifact"
-            echo "git fetch origin <target-ref>"
-            echo "git switch -c apply-basic-cleanup-<run-number> origin/<target-ref>"
-            echo "git apply cleanup-artifact\\basic-code-cleanup.patch"
-            echo "git status"
-            echo "\`\`\`"
-            echo
-            echo "After reviewing the diff and running any needed tests:"
-            echo
-            echo "\`\`\`powershell"
-            echo "git add ."
-            echo "git commit -m \"Apply basic code cleanup\""
-            echo "git push --set-upstream origin apply-basic-cleanup-<run-number>"
-            echo "\`\`\`"
-            echo
-            echo "## Review checklist"
-            echo
-            echo "- Confirm no functional files changed unexpectedly."
-            echo "- Confirm no new High/Critical analyzer findings appeared."
-            echo "- Confirm Prettier warnings and analyzer deltas make sense."
-            echo "- Review ESLint remaining problems as separate code-aware work."
+            echo "- Rever o patch gerado no artifact."
+            echo "- Confirmar que nao surgiram novos High/Critical."
+            echo "- Tratar problemas ESLint restantes como trabalho separado."
           } > "$operator_guide_md"
 
           node -e "
@@ -784,7 +760,7 @@ jobs:
             project/docs/basic-code-cleanup-guard/style-checks-after.json
             project/docs/basic-code-cleanup-guard/cleanup-classification.md
             project/docs/basic-code-cleanup-guard/cleanup-classification.json
-            project/docs/basic-code-cleanup-guard/operator-guide.md
+            project/docs/basic-code-cleanup-guard/resumo-operacional.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.patch
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.diffstat
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.numstat
