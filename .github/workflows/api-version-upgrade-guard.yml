@@ -29,6 +29,25 @@ on:
         required: true
         default: "auto/api-version-upgrade"
         type: string
+      run_deploy_validate:
+        description: "Validate deployment in Salesforce before pushing the fix branch"
+        required: true
+        default: true
+        type: boolean
+      test_level:
+        description: "Salesforce deploy validation test level"
+        required: true
+        default: "RunLocalTests"
+        type: choice
+        options:
+          - NoTestRun
+          - RunLocalTests
+          - RunAllTestsInOrg
+      deploy_wait_minutes:
+        description: "Minutes to wait for Salesforce deploy validation"
+        required: true
+        default: "30"
+        type: string
 
 permissions:
   contents: write
@@ -214,6 +233,62 @@ jobs:
 
           cat "${REPORT_DIR}/analyzer-comparison.md"
 
+      - name: Validate deployment in Salesforce
+        if: ${{ inputs.run_deploy_validate }}
+        shell: bash
+        working-directory: project
+        env:
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+
+          report_md="${REPORT_DIR}/deploy-validation-report.md"
+          report_log="${REPORT_DIR}/deploy-validation.log"
+
+          if [ -z "${SF_AUTH_URL:-}" ]; then
+            {
+              echo "# Deploy validation"
+              echo
+              echo "- Status: failed"
+              echo "- Reason: SF_AUTH_URL secret is not configured."
+            } > "$report_md"
+            echo "SF_AUTH_URL secret is not configured." > "$report_log"
+            exit 1
+          fi
+
+          auth_file="$(mktemp)"
+          trap 'rm -f "$auth_file"' EXIT
+          printf '%s' "$SF_AUTH_URL" > "$auth_file"
+
+          sf org login sfdx-url --sfdx-url-file "$auth_file" --alias validation-org
+
+          set +e
+          sf project deploy validate \
+            --source-dir "${{ inputs.source_dir }}" \
+            --target-org validation-org \
+            --test-level "${{ inputs.test_level }}" \
+            --wait "${{ inputs.deploy_wait_minutes }}" > "$report_log" 2>&1
+          validate_code=$?
+          set -e
+
+          if [ "$validate_code" -eq 0 ]; then
+            status="passed"
+          else
+            status="failed"
+          fi
+
+          {
+            echo "# Deploy validation"
+            echo
+            echo "- Status: ${status}"
+            echo "- Test level: ${{ inputs.test_level }}"
+            echo "- Source dir: ${{ inputs.source_dir }}"
+            echo "- Exit code: ${validate_code}"
+          } > "$report_md"
+
+          cat "$report_log"
+          exit "$validate_code"
+
       - name: Push API version fix branch
         id: push-fix
         if: ${{ inputs.create_fix_branch }}
@@ -335,6 +410,11 @@ jobs:
               echo "- Branch de correção criada: não."
               echo "- Motivo: ${FIX_BRANCH_REASON:-não aplicável}."
             fi
+            if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
+              echo "- Deploy validation: executado antes da criação da branch."
+            else
+              echo "- Deploy validation: não executado."
+            fi
             echo "- Não faz merge automático nem altera diretamente a branch alvo."
             echo "- O resultado compara apenas o estado antes/depois do run atual. Não usa API externa nem histórico entre runs."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -384,4 +464,6 @@ jobs:
             project/docs/api-version-upgrade-guard/analyzer-comparison.json
             project/docs/api-version-upgrade-guard/comparison-summary.env
             project/docs/api-version-upgrade-guard/api-version-upgrade-summary.html
+            project/docs/api-version-upgrade-guard/deploy-validation-report.md
+            project/docs/api-version-upgrade-guard/deploy-validation.log
           if-no-files-found: warn
