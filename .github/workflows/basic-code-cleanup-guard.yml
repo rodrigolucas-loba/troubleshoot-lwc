@@ -578,7 +578,7 @@ jobs:
             echo "## Mode guide"
             echo
             echo "- \`safe\`: lowest risk; removes trailing whitespace and adds missing final newlines."
-            echo "- \`format\`: recommended for this POC; runs safe cleanup plus Prettier formatting."
+            echo "- \`format\`: recommended for most cleanup reviews; runs safe cleanup plus Prettier formatting."
             echo "- \`format_lintfix\`: most aggressive; runs format plus ESLint --fix, still requiring patch review."
             echo
             echo "## Apply patch manually"
