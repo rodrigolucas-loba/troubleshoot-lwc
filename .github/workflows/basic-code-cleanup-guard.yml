@@ -12,7 +12,7 @@ on:
       target_ref:
         description: "Branch or ref containing the Salesforce project to test"
         required: true
-        default: "monitoring_loba_b_dev_ed_develop"
+        default: "main"
         type: string
       cleanup_mode:
         description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint --fix"
@@ -500,13 +500,9 @@ jobs:
           fi
 
           if [ "${fixed_findings:-0}" -gt 0 ]; then
-            if [ "${fixed_findings:-0}" -eq 1 ]; then
-              analyzer_insight="Fixed 1 analyzer finding."
-            else
-              analyzer_insight="Fixed ${fixed_findings} analyzer findings."
-            fi
+            analyzer_insight="Analyzer findings decreased after cleanup."
           else
-            analyzer_insight="No analyzer findings were fixed by this cleanup."
+            analyzer_insight="Analyzer findings did not decrease after cleanup."
           fi
 
           prettier_fixed=$((prettier_warnings_before - prettier_warnings_after))
@@ -540,7 +536,7 @@ jobs:
             fi
             echo "- Trailing whitespace lines removed: **${trailing_fixed}**"
             echo "- Final newlines added: **${final_newlines}**"
-            echo "- Analyzer findings removed by this cleanup: **${fixed_findings:-0}**"
+            echo "- Analyzer findings trend: **${total_before:-0} -> ${total_after:-0}**"
             if [ "${eslint_fixed}" -gt 0 ]; then
               echo "- ESLint auto-fix problems reduced: **${eslint_problems_before} -> ${eslint_problems_after}** (${eslint_fixed} fixed)"
             else
@@ -555,9 +551,9 @@ jobs:
             echo "- Analyzer findings remaining: **${analyzer_remaining}**"
             echo "- New High/Critical findings introduced: **${new_high_or_critical:-0}**"
             echo
-            echo "## Why analyzer only decreased by ${fixed_findings:-0}"
+            echo "## How to read these metrics"
             echo
-            echo "The analyzer only counts rules it reports, such as NoTrailingWhitespace. Formatting and indentation are measured separately by Prettier. Code-aware problems such as unused variables, no-use-before-define, no-unused-expressions, vars-on-top, and SLDS hardcoded values are not safe formatting fixes and should be reviewed separately."
+            echo "Analyzer findings, Prettier warnings, and ESLint problems are separate quality signals. Formatting and indentation are measured by Prettier. Some analyzer rules can be reduced by formatting cleanup, but many code-aware issues require human review. ESLint --fix only applies fixes that the configured rules mark as automatically safe."
           } > "$classification_md"
 
           {
@@ -588,7 +584,7 @@ jobs:
             echo "## Apply patch manually"
             echo
             echo "\`\`\`powershell"
-            echo "cd C:\\Users\\rodri\\Desktop\\troubleshoot-lwc"
+            echo "cd <local-repository-path>"
             echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name basic-code-cleanup-guard-${{ github.run_number }} --dir cleanup-artifact"
             echo "git fetch origin ${{ inputs.target_ref }}"
             echo "git switch -c apply-basic-cleanup-${{ github.run_number }} origin/${{ inputs.target_ref }}"
@@ -690,7 +686,7 @@ jobs:
           echo "Patch deletions: ${diff_deletions}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "New High/Critical findings: ${new_high_or_critical:-0}"
-          echo "::notice title=Basic cleanup insight::${operator_decision}. ${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. ESLint fix: ${eslint_fix_status}. Prettier warnings: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint problems: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}."
+          echo "::notice title=Basic cleanup insight::${operator_decision}. ${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Formatter: ${formatter_status}. ESLint fix: ${eslint_fix_status}. Prettier warnings: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint problems: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
 
           {
             echo "## Basic Code Cleanup Insight"
