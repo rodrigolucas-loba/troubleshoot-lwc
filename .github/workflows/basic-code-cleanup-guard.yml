@@ -478,9 +478,8 @@ jobs:
             exit 0
           fi
 
-          safe_ref="$(printf '%s' "${{ inputs.target_ref }}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
           safe_mode="$(printf '%s' "${{ inputs.cleanup_mode }}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
-          fix_branch="${{ inputs.fix_branch_prefix }}/${safe_ref}-${safe_mode}-${{ github.run_number }}"
+          fix_branch="${{ inputs.fix_branch_prefix }}/${safe_mode}-run-${{ github.run_number }}-${{ github.run_attempt }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
