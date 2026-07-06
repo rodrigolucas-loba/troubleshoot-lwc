@@ -234,6 +234,7 @@ jobs:
           cat "${REPORT_DIR}/analyzer-comparison.md"
 
       - name: Validate deployment in Salesforce
+        id: deploy-validation
         if: ${{ inputs.run_deploy_validate }}
         shell: bash
         working-directory: project
@@ -246,29 +247,44 @@ jobs:
           report_log="${REPORT_DIR}/deploy-validation.log"
 
           if [ -z "${SF_AUTH_URL:-}" ]; then
+            status="failed"
+            validate_code=1
             {
               echo "# Deploy validation"
               echo
-              echo "- Status: failed"
+              echo "- Status: ${status}"
               echo "- Reason: SF_AUTH_URL secret is not configured."
             } > "$report_md"
             echo "SF_AUTH_URL secret is not configured." > "$report_log"
-            exit 1
+            echo "deploy_validation_status=${status}" >> "$GITHUB_OUTPUT"
+            echo "deploy_validation_exit_code=${validate_code}" >> "$GITHUB_OUTPUT"
+            cat "$report_log"
+            exit 0
           fi
 
           auth_file="$(mktemp)"
           trap 'rm -f "$auth_file"' EXIT
           printf '%s' "$SF_AUTH_URL" > "$auth_file"
 
-          sf org login sfdx-url --sfdx-url-file "$auth_file" --alias validation-org
-
           set +e
-          sf project deploy validate \
-            --source-dir "${{ inputs.source_dir }}" \
-            --target-org validation-org \
-            --test-level "${{ inputs.test_level }}" \
-            --wait "${{ inputs.deploy_wait_minutes }}" > "$report_log" 2>&1
-          validate_code=$?
+          sf org login sfdx-url --sfdx-url-file "$auth_file" --alias validation-org > "$report_log" 2>&1
+          login_code=$?
+
+          if [ "$login_code" -ne 0 ]; then
+            validate_code="$login_code"
+          else
+            {
+              echo
+              echo "Running deploy validation..."
+            } >> "$report_log"
+
+            sf project deploy validate \
+              --source-dir "${{ inputs.source_dir }}" \
+              --target-org validation-org \
+              --test-level "${{ inputs.test_level }}" \
+              --wait "${{ inputs.deploy_wait_minutes }}" >> "$report_log" 2>&1
+            validate_code=$?
+          fi
           set -e
 
           if [ "$validate_code" -eq 0 ]; then
@@ -286,12 +302,15 @@ jobs:
             echo "- Exit code: ${validate_code}"
           } > "$report_md"
 
+          echo "deploy_validation_status=${status}" >> "$GITHUB_OUTPUT"
+          echo "deploy_validation_exit_code=${validate_code}" >> "$GITHUB_OUTPUT"
+
           cat "$report_log"
-          exit "$validate_code"
+          exit 0
 
       - name: Push API version fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch }}
+        if: ${{ inputs.create_fix_branch && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
         shell: bash
         working-directory: project
         env:
@@ -348,6 +367,8 @@ jobs:
           FIX_BRANCH_PUSHED: ${{ steps.push-fix.outputs.pushed }}
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           FIX_BRANCH_REASON: ${{ steps.push-fix.outputs.reason }}
+          DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
+          DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         run: |
           summary_file="${REPORT_DIR}/comparison-summary.env"
 
@@ -406,12 +427,15 @@ jobs:
             echo
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
               echo "- Branch de correção criada: \`${FIX_BRANCH_NAME}\`"
+            elif [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+              echo "- Branch de correção criada: não."
+              echo "- Motivo: deploy validation falhou."
             else
               echo "- Branch de correção criada: não."
               echo "- Motivo: ${FIX_BRANCH_REASON:-não aplicável}."
             fi
             if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
-              echo "- Deploy validation: executado antes da criação da branch."
+              echo "- Deploy validation: ${DEPLOY_VALIDATION_STATUS:-failed}."
             else
               echo "- Deploy validation: não executado."
             fi
@@ -467,3 +491,10 @@ jobs:
             project/docs/api-version-upgrade-guard/deploy-validation-report.md
             project/docs/api-version-upgrade-guard/deploy-validation.log
           if-no-files-found: warn
+
+      - name: Fail if deploy validation failed
+        if: ${{ inputs.run_deploy_validate && steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
+        shell: bash
+        run: |
+          echo "Deploy validation failed. Check deploy-validation.log in the uploaded artifact."
+          exit 1
