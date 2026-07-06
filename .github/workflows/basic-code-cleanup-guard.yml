@@ -1,0 +1,214 @@
+name: Basic Code Cleanup Guard
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_dir:
+        description: "Salesforce source directory"
+        required: true
+        default: "force-app"
+        type: string
+      target_ref:
+        description: "Branch or ref containing the Salesforce project to test"
+        required: true
+        default: "monitoring_loba_b_dev_ed_develop"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  SF_CLI_VERSION: "2.133.4"
+  SF_CODE_ANALYZER_VERSION: "5.13.0"
+  REPORT_DIR: "docs/basic-code-cleanup-guard"
+
+jobs:
+  basic-code-cleanup-guard:
+    name: Test basic code cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout workflow tools
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: tools
+          submodules: false
+          persist-credentials: false
+
+      - name: Checkout target project
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git clone \
+            --no-recurse-submodules \
+            --branch "${{ inputs.target_ref }}" \
+            --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            project
+
+          git -C project remote set-url origin "https://github.com/${{ github.repository }}.git"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Salesforce CLI
+        shell: bash
+        run: npm install --global @salesforce/cli@${SF_CLI_VERSION}
+
+      - name: Install Salesforce Code Analyzer plugin
+        shell: bash
+        run: sf plugins install code-analyzer@${SF_CODE_ANALYZER_VERSION}
+
+      - name: Prepare report directory
+        shell: bash
+        working-directory: project
+        run: |
+          mkdir -p "${REPORT_DIR}"
+          rm -f "${REPORT_DIR}"/*
+
+      - name: Run analyzer before cleanup
+        id: analyzer-before
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        run: |
+          set +e
+          sf code-analyzer run \
+            --workspace . \
+            --target "${{ inputs.source_dir }}" \
+            --rule-selector Recommended \
+            --output-file "${REPORT_DIR}/analyzer-before.csv" \
+            --view table
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Apply basic cleanup in runner
+        shell: bash
+        working-directory: project
+        run: |
+          node ../tools/scripts/nodejs/basic-code-cleanup-guard.mjs \
+            --source-dir "${{ inputs.source_dir }}" \
+            --report "${REPORT_DIR}/basic-code-cleanup-report.md" \
+            --json "${REPORT_DIR}/basic-code-cleanup-report.json"
+
+      - name: Save cleanup patch
+        shell: bash
+        working-directory: project
+        run: |
+          git diff --name-only > "${REPORT_DIR}/changed-files.txt"
+          git diff > "${REPORT_DIR}/basic-code-cleanup.patch"
+
+      - name: Run analyzer after cleanup
+        id: analyzer-after
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        run: |
+          set +e
+          sf code-analyzer run \
+            --workspace . \
+            --target "${{ inputs.source_dir }}" \
+            --rule-selector Recommended \
+            --output-file "${REPORT_DIR}/analyzer-after.csv" \
+            --view table
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Compare analyzer results
+        shell: bash
+        working-directory: project
+        run: |
+          node ../tools/scripts/nodejs/compare-basic-cleanup-analyzer-results.mjs \
+            --before "${REPORT_DIR}/analyzer-before.csv" \
+            --after "${REPORT_DIR}/analyzer-after.csv" \
+            --out-dir "${REPORT_DIR}" \
+            --target-ref "${{ inputs.target_ref }}" \
+            --source-dir "${{ inputs.source_dir }}" \
+            --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
+            --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
+
+          cat "${REPORT_DIR}/analyzer-comparison.md"
+
+      - name: Publish basic cleanup insight
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
+          summary_file="${REPORT_DIR}/comparison-summary.env"
+
+          if [ -f "$cleanup_json" ]; then
+            changed_files="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.changedFiles || 0)" "$cleanup_json")"
+            trailing_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.trailingWhitespaceLinesFixed || 0)" "$cleanup_json")"
+            final_newlines="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.finalNewlinesAdded || 0)" "$cleanup_json")"
+          else
+            changed_files=0
+            trailing_fixed=0
+            final_newlines=0
+          fi
+
+          if [ -f "$summary_file" ]; then
+            set -a
+            . "$summary_file"
+            set +a
+          fi
+
+          if [ "${fixed_findings:-0}" -gt 0 ]; then
+            if [ "${fixed_findings:-0}" -eq 1 ]; then
+              analyzer_insight="Fixed 1 analyzer finding."
+            else
+              analyzer_insight="Fixed ${fixed_findings} analyzer findings."
+            fi
+          else
+            analyzer_insight="No analyzer findings were fixed by this cleanup."
+          fi
+
+          {
+            echo "## Basic Code Cleanup Insight"
+            echo
+            echo "**${analyzer_insight}**"
+            echo
+            echo "| Metric | Count |"
+            echo "| --- | ---: |"
+            echo "| Files changed by cleanup | ${changed_files} |"
+            echo "| Trailing whitespace lines fixed | ${trailing_fixed} |"
+            echo "| Final newlines added | ${final_newlines} |"
+            echo "| Analyzer findings before | ${total_before:-0} |"
+            echo "| Analyzer findings after | ${total_after:-0} |"
+            echo "| New High/Critical findings | ${new_high_or_critical:-0} |"
+            echo
+            echo "The cleanup is not committed automatically. Apply the uploaded patch only after review."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: List generated reports
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          find docs/basic-code-cleanup-guard -maxdepth 1 -type f -print | sort || true
+
+      - name: Upload basic cleanup artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-code-cleanup-guard-${{ github.run_number }}
+          path: |
+            project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.md
+            project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json
+            project/docs/basic-code-cleanup-guard/basic-code-cleanup.patch
+            project/docs/basic-code-cleanup-guard/changed-files.txt
+            project/docs/basic-code-cleanup-guard/analyzer-before.csv
+            project/docs/basic-code-cleanup-guard/analyzer-after.csv
+            project/docs/basic-code-cleanup-guard/analyzer-comparison.md
+            project/docs/basic-code-cleanup-guard/analyzer-comparison.json
+            project/docs/basic-code-cleanup-guard/comparison-summary.env
+          if-no-files-found: warn
