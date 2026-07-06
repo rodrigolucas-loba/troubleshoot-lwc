@@ -585,9 +585,9 @@ jobs:
             echo
             echo "\`\`\`powershell"
             echo "cd <local-repository-path>"
-            echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name basic-code-cleanup-guard-${{ github.run_number }} --dir cleanup-artifact"
-            echo "git fetch origin ${{ inputs.target_ref }}"
-            echo "git switch -c apply-basic-cleanup-${{ github.run_number }} origin/${{ inputs.target_ref }}"
+            echo "gh run download <run-id> --repo <owner>/<repository> --name <artifact-name> --dir cleanup-artifact"
+            echo "git fetch origin <target-ref>"
+            echo "git switch -c apply-basic-cleanup-<run-number> origin/<target-ref>"
             echo "git apply cleanup-artifact\\basic-code-cleanup.patch"
             echo "git status"
             echo "\`\`\`"
@@ -597,7 +597,7 @@ jobs:
             echo "\`\`\`powershell"
             echo "git add ."
             echo "git commit -m \"Apply basic code cleanup\""
-            echo "git push --set-upstream origin apply-basic-cleanup-${{ github.run_number }}"
+            echo "git push --set-upstream origin apply-basic-cleanup-<run-number>"
             echo "\`\`\`"
             echo
             echo "## Review checklist"
