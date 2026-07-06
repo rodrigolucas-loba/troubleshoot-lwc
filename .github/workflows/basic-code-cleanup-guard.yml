@@ -142,14 +142,21 @@ jobs:
           fi
 
           set +e
-          npm run prettier:verify > "$prettier_log" 2>&1
+          npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
+          prettier_warnings=$(grep -c '\[warn\]' "$prettier_log" || true)
 
           npm run lint > "$eslint_log" 2>&1
           eslint_code=$?
+          eslint_problems=$(grep -Eo '[0-9]+ problems?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_errors=$(grep -Eo '[0-9]+ errors?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_warnings=$(grep -Eo '[0-9]+ warnings?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_problems=${eslint_problems:-0}
+          eslint_errors=${eslint_errors:-0}
+          eslint_warnings=${eslint_warnings:-0}
 
-          echo "{\"prettierExitCode\":${prettier_code},\"eslintExitCode\":${eslint_code},\"status\":\"completed\"}" > "$report_json"
-          echo "Style checks before cleanup completed. Prettier exit code: ${prettier_code}. ESLint exit code: ${eslint_code}."
+          echo "{\"prettierExitCode\":${prettier_code},\"prettierWarnings\":${prettier_warnings},\"eslintExitCode\":${eslint_code},\"eslintProblems\":${eslint_problems},\"eslintErrors\":${eslint_errors},\"eslintWarnings\":${eslint_warnings},\"status\":\"completed\"}" > "$report_json"
+          echo "Style checks before cleanup completed. Prettier exit code: ${prettier_code}. Prettier warnings: ${prettier_warnings}. ESLint exit code: ${eslint_code}. ESLint problems: ${eslint_problems}."
           exit 0
 
       - name: Run analyzer before cleanup
@@ -266,14 +273,21 @@ jobs:
           fi
 
           set +e
-          npm run prettier:verify > "$prettier_log" 2>&1
+          npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
+          prettier_warnings=$(grep -c '\[warn\]' "$prettier_log" || true)
 
           npm run lint > "$eslint_log" 2>&1
           eslint_code=$?
+          eslint_problems=$(grep -Eo '[0-9]+ problems?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_errors=$(grep -Eo '[0-9]+ errors?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_warnings=$(grep -Eo '[0-9]+ warnings?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_problems=${eslint_problems:-0}
+          eslint_errors=${eslint_errors:-0}
+          eslint_warnings=${eslint_warnings:-0}
 
-          echo "{\"prettierExitCode\":${prettier_code},\"eslintExitCode\":${eslint_code},\"status\":\"completed\"}" > "$report_json"
-          echo "Style checks after cleanup completed. Prettier exit code: ${prettier_code}. ESLint exit code: ${eslint_code}."
+          echo "{\"prettierExitCode\":${prettier_code},\"prettierWarnings\":${prettier_warnings},\"eslintExitCode\":${eslint_code},\"eslintProblems\":${eslint_problems},\"eslintErrors\":${eslint_errors},\"eslintWarnings\":${eslint_warnings},\"status\":\"completed\"}" > "$report_json"
+          echo "Style checks after cleanup completed. Prettier exit code: ${prettier_code}. Prettier warnings: ${prettier_warnings}. ESLint exit code: ${eslint_code}. ESLint problems: ${eslint_problems}."
           exit 0
 
       - name: Save cleanup patch
@@ -362,18 +376,34 @@ jobs:
 
           if [ -f "$style_before_json" ]; then
             prettier_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.prettierExitCode ?? 0)" "$style_before_json")"
+            prettier_warnings_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.prettierWarnings ?? 0)" "$style_before_json")"
             eslint_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintExitCode ?? 0)" "$style_before_json")"
+            eslint_problems_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintProblems ?? 0)" "$style_before_json")"
+            eslint_errors_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintErrors ?? 0)" "$style_before_json")"
+            eslint_warnings_before="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintWarnings ?? 0)" "$style_before_json")"
           else
             prettier_before=0
+            prettier_warnings_before=0
             eslint_before=0
+            eslint_problems_before=0
+            eslint_errors_before=0
+            eslint_warnings_before=0
           fi
 
           if [ -f "$style_after_json" ]; then
             prettier_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.prettierExitCode ?? 0)" "$style_after_json")"
+            prettier_warnings_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.prettierWarnings ?? 0)" "$style_after_json")"
             eslint_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintExitCode ?? 0)" "$style_after_json")"
+            eslint_problems_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintProblems ?? 0)" "$style_after_json")"
+            eslint_errors_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintErrors ?? 0)" "$style_after_json")"
+            eslint_warnings_after="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintWarnings ?? 0)" "$style_after_json")"
           else
             prettier_after=0
+            prettier_warnings_after=0
             eslint_after=0
+            eslint_problems_after=0
+            eslint_errors_after=0
+            eslint_warnings_after=0
           fi
 
           if [ -f "$summary_file" ]; then
@@ -411,13 +441,17 @@ jobs:
           echo "Formatter status: ${formatter_status}"
           echo "Formatter exit code: ${formatter_exit_code}"
           echo "Prettier verify exit code: ${prettier_before} -> ${prettier_after}"
+          echo "Prettier warnings: ${prettier_warnings_before} -> ${prettier_warnings_after}"
           echo "ESLint exit code: ${eslint_before} -> ${eslint_after}"
+          echo "ESLint problems: ${eslint_problems_before} -> ${eslint_problems_after}"
+          echo "ESLint errors: ${eslint_errors_before} -> ${eslint_errors_after}"
+          echo "ESLint warnings: ${eslint_warnings_before} -> ${eslint_warnings_after}"
           echo "Patch files changed: ${diff_files}"
           echo "Patch insertions: ${diff_insertions}"
           echo "Patch deletions: ${diff_deletions}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "New High/Critical findings: ${new_high_or_critical:-0}"
-          echo "::notice title=Basic cleanup insight::${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. Prettier: ${prettier_before}->${prettier_after}. ESLint: ${eslint_before}->${eslint_after}. Analyzer: ${total_before:-0}->${total_after:-0}."
+          echo "::notice title=Basic cleanup insight::${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. Prettier warnings: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint problems: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}."
 
           {
             echo "## Basic Code Cleanup Insight"
@@ -434,8 +468,16 @@ jobs:
             echo "| Formatter exit code | ${formatter_exit_code} |"
             echo "| Prettier verify exit code before | ${prettier_before} |"
             echo "| Prettier verify exit code after | ${prettier_after} |"
+            echo "| Prettier warnings before | ${prettier_warnings_before} |"
+            echo "| Prettier warnings after | ${prettier_warnings_after} |"
             echo "| ESLint exit code before | ${eslint_before} |"
             echo "| ESLint exit code after | ${eslint_after} |"
+            echo "| ESLint problems before | ${eslint_problems_before} |"
+            echo "| ESLint problems after | ${eslint_problems_after} |"
+            echo "| ESLint errors before | ${eslint_errors_before} |"
+            echo "| ESLint errors after | ${eslint_errors_after} |"
+            echo "| ESLint warnings before | ${eslint_warnings_before} |"
+            echo "| ESLint warnings after | ${eslint_warnings_after} |"
             echo "| Patch files changed | ${diff_files} |"
             echo "| Patch insertions | ${diff_insertions} |"
             echo "| Patch deletions | ${diff_deletions} |"
