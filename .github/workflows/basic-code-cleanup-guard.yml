@@ -1,5 +1,5 @@
 name: Basic Code Cleanup Guard
-run-name: "Cleanup ${{ inputs.cleanup_mode }} on ${{ inputs.target_ref }}"
+run-name: "Basic cleanup guard (${{ inputs.cleanup_mode }})"
 
 on:
   workflow_dispatch:
@@ -405,7 +405,7 @@ jobs:
             --before "${REPORT_DIR}/analyzer-before.csv" \
             --after "${REPORT_DIR}/analyzer-after.csv" \
             --out-dir "${REPORT_DIR}" \
-            --target-ref "${{ inputs.target_ref }}" \
+            --target-ref "<target-ref>" \
             --source-dir "${{ inputs.source_dir }}" \
             --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
             --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
@@ -564,8 +564,8 @@ jobs:
             echo "- Recommendation: **${operator_decision}**"
             echo "- Reason: ${operator_reason}"
             echo "- Cleanup mode: \`${{ inputs.cleanup_mode }}\`"
-            echo "- Target ref: \`${{ inputs.target_ref }}\`"
-            echo "- Source dir: \`${{ inputs.source_dir }}\`"
+            echo "- Target ref: provided at workflow dispatch"
+            echo "- Source dir: provided at workflow dispatch"
             echo
             echo "## What this run did"
             echo
