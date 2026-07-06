@@ -54,6 +54,7 @@ jobs:
           fetch-depth: 0
           path: tools
           submodules: false
+          persist-credentials: false
 
       - name: Checkout target project
         uses: actions/checkout@v4
@@ -62,6 +63,7 @@ jobs:
           ref: ${{ inputs.target_ref }}
           path: project
           submodules: false
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -310,3 +312,14 @@ jobs:
             project/docs/api-version-upgrade-guard/deploy-validate.md
             project/docs/api-version-upgrade-guard/deploy-validate.json
           if-no-files-found: warn
+
+      - name: Patch broken submodule metadata for checkout cleanup
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          if git ls-files --stage build-apps-with-lwc | grep -q '^160000'; then
+            git config -f .gitmodules submodule.build-apps-with-lwc.path build-apps-with-lwc
+            git config -f .gitmodules submodule.build-apps-with-lwc.url https://github.com/developerforce/build-apps-with-lwc.git
+            cat .gitmodules
+          fi
