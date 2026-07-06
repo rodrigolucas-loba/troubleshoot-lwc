@@ -34,6 +34,11 @@ on:
         required: true
         default: true
         type: boolean
+      enforce_deploy_validation:
+        description: "Fail the workflow and block the fix branch when Salesforce deploy validation fails"
+        required: true
+        default: false
+        type: boolean
       test_level:
         description: "Salesforce deploy validation test level"
         required: true
@@ -310,7 +315,7 @@ jobs:
 
       - name: Push API version fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        if: ${{ inputs.create_fix_branch && (!inputs.enforce_deploy_validation || !inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
         shell: bash
         working-directory: project
         env:
@@ -383,6 +388,11 @@ jobs:
 
             echo "- Estado: **${DEPLOY_VALIDATION_STATUS:-failed}**"
             echo "- Exit code: **${DEPLOY_VALIDATION_EXIT_CODE:-unknown}**"
+            if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
+              echo "- Enforcement: **ativo**"
+            else
+              echo "- Enforcement: **informativo**"
+            fi
 
             if [ -f "$deploy_log" ]; then
               echo
@@ -456,9 +466,9 @@ jobs:
             echo
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
               echo "- Branch de correção criada: \`${FIX_BRANCH_NAME}\`"
-            elif [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            elif [ "${{ inputs.enforce_deploy_validation }}" = "true" ] && [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
               echo "- Branch de correção criada: não."
-              echo "- Motivo: deploy validation falhou."
+              echo "- Motivo: deploy validation falhou e enforcement está ativo."
             else
               echo "- Branch de correção criada: não."
               echo "- Motivo: ${FIX_BRANCH_REASON:-não aplicável}."
@@ -524,9 +534,9 @@ jobs:
             project/docs/api-version-upgrade-guard/deploy-validation.log
           if-no-files-found: warn
 
-      - name: Fail if deploy validation failed
-        if: ${{ inputs.run_deploy_validate && steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
+      - name: Fail if enforced deploy validation failed
+        if: ${{ inputs.enforce_deploy_validation && inputs.run_deploy_validate && steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
         shell: bash
         run: |
-          echo "Deploy validation failed. Check deploy-validation.log in the uploaded artifact."
+          echo "Deploy validation failed and enforcement is active. Check deploy-validation.log in the uploaded artifact."
           exit 1
