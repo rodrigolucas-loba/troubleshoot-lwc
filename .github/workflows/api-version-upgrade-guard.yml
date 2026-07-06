@@ -18,19 +18,6 @@ on:
         required: true
         default: "monitoring_loba_b_dev_ed_develop"
         type: string
-      run_deploy_validate:
-        description: "Run sf project deploy validate when SF_AUTH_URL_API_GUARD is configured"
-        required: true
-        default: false
-        type: boolean
-      test_level:
-        description: "Salesforce deploy validation test level"
-        required: true
-        default: "NoTestRun"
-        type: choice
-        options:
-          - NoTestRun
-          - RunLocalTests
 
 permissions:
   contents: read
@@ -39,7 +26,6 @@ env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
   REPORT_DIR: "docs/api-version-upgrade-guard"
-  SF_AUTH_URL_API_GUARD: ${{ secrets.SF_AUTH_URL_API_GUARD }}
 
 jobs:
   api-version-upgrade-guard:
@@ -238,9 +224,17 @@ jobs:
           set +a
 
           if [ "${fixed_findings:-0}" -gt 0 ]; then
-            insight="Fixed ${fixed_findings} analyzer finding(s)."
+            if [ "${fixed_findings:-0}" -eq 1 ]; then
+              insight="Fixed 1 analyzer finding."
+            else
+              insight="Fixed ${fixed_findings} analyzer findings."
+            fi
           elif [ "${new_findings:-0}" -gt 0 ]; then
-            insight="No findings were fixed and ${new_findings} new finding(s) appeared."
+            if [ "${new_findings:-0}" -eq 1 ]; then
+              insight="No findings were fixed and 1 new finding appeared."
+            else
+              insight="No findings were fixed and ${new_findings} new findings appeared."
+            fi
           else
             insight="No analyzer findings were fixed by this API version update."
           fi
@@ -259,79 +253,6 @@ jobs:
             echo
             echo "Detailed reports are available in the uploaded artifact."
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Optional deploy validate
-        if: ${{ always() }}
-        shell: bash
-        working-directory: project
-        run: |
-          set +e
-
-          summary_path="${REPORT_DIR}/deploy-validate.md"
-          json_path="${REPORT_DIR}/deploy-validate.json"
-
-          if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
-            {
-              echo "# Deploy Validate"
-              echo
-              echo "Skipped. Input run_deploy_validate was false."
-            } > "$summary_path"
-            exit 0
-          fi
-
-          if [ -z "${SF_AUTH_URL_API_GUARD}" ]; then
-            {
-              echo "# Deploy Validate"
-              echo
-              echo "Skipped. Secret SF_AUTH_URL_API_GUARD is not configured."
-            } > "$summary_path"
-            exit 0
-          fi
-
-          printf '%s' "${SF_AUTH_URL_API_GUARD}" > sf-auth-url-api-guard.txt
-          sf org login sfdx-url \
-            --sfdx-url-file sf-auth-url-api-guard.txt \
-            --alias api-version-guard \
-            --set-default
-          login_code=$?
-
-          if [ "$login_code" -ne 0 ]; then
-            {
-              echo "# Deploy Validate"
-              echo
-              echo "NOT SAFE: Salesforce authentication failed."
-            } > "$summary_path"
-            echo "{\"status\":\"auth_failed\"}" > "$json_path"
-            rm -f sf-auth-url-api-guard.txt
-            exit 0
-          fi
-
-          sf project deploy validate \
-            --source-dir "${{ inputs.source_dir }}" \
-            --target-org api-version-guard \
-            --test-level "${{ inputs.test_level }}" \
-            --json > "$json_path"
-          validate_code=$?
-
-          {
-            echo "# Deploy Validate"
-            echo
-            echo "- Enabled: true"
-            echo "- Test level: ${{ inputs.test_level }}"
-            echo "- Exit code: ${validate_code}"
-            echo
-            if [ "$validate_code" -eq 0 ]; then
-              echo "SAFE SIGNAL: deploy validate completed successfully."
-            else
-              echo "NOT SAFE SIGNAL: deploy validate failed. Inspect deploy-validate.json."
-            fi
-          } > "$summary_path"
-
-          rm -f sf-auth-url-api-guard.txt
-
-          if [ "$validate_code" -ne 0 ]; then
-            echo "Deploy validate failed. Check artifact deploy-validate.json."
-          fi
 
       - name: List generated reports
         if: ${{ always() }}
@@ -360,17 +281,4 @@ jobs:
             project/docs/api-version-upgrade-guard/analyzer-comparison.json
             project/docs/api-version-upgrade-guard/comparison-summary.env
             project/docs/api-version-upgrade-guard/api-version-upgrade-summary.html
-            project/docs/api-version-upgrade-guard/deploy-validate.md
-            project/docs/api-version-upgrade-guard/deploy-validate.json
           if-no-files-found: warn
-
-      - name: Patch broken submodule metadata for checkout cleanup
-        if: ${{ always() }}
-        shell: bash
-        working-directory: project
-        run: |
-          if git ls-files --stage build-apps-with-lwc | grep -q '^160000'; then
-            git config -f .gitmodules submodule.build-apps-with-lwc.path build-apps-with-lwc
-            git config -f .gitmodules submodule.build-apps-with-lwc.url https://github.com/developerforce/build-apps-with-lwc.git
-            cat .gitmodules
-          fi
