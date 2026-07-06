@@ -19,9 +19,19 @@ on:
         required: true
         default: "main"
         type: string
+      create_fix_branch:
+        description: "Create and push a branch with safe automated fixes"
+        required: true
+        default: true
+        type: boolean
+      fix_branch_prefix:
+        description: "Prefix for the generated fix branch"
+        required: true
+        default: "auto/api-version-upgrade"
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   SF_CLI_VERSION: "2.133.4"
@@ -204,10 +214,66 @@ jobs:
 
           cat "${REPORT_DIR}/analyzer-comparison.md"
 
+      - name: Push API version fix branch
+        id: push-fix
+        if: ${{ inputs.create_fix_branch }}
+        shell: bash
+        working-directory: project
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          summary_file="${REPORT_DIR}/comparison-summary.env"
+          changed_file="${REPORT_DIR}/changed-files.txt"
+
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          echo "branch=" >> "$GITHUB_OUTPUT"
+
+          if [ ! -f "$summary_file" ] || [ ! -f "$changed_file" ]; then
+            echo "reason=missing comparison or changed-files report" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          set -a
+          . "$summary_file"
+          set +a
+
+          changed_count="$(grep -cve '^[[:space:]]*$' "$changed_file" || true)"
+
+          if [ "$changed_count" -eq 0 ]; then
+            echo "reason=no files changed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${new_high_or_critical:-0}" -gt 0 ]; then
+            echo "reason=new High/Critical findings detected" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          safe_ref="$(printf '%s' "${{ inputs.target_ref }}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
+          fix_branch="${{ inputs.fix_branch_prefix }}/${safe_ref}-${{ github.run_number }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$fix_branch"
+          git add --pathspec-from-file="$changed_file"
+          git commit -m "Apply API version cleanup"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push --set-upstream origin "$fix_branch"
+
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$fix_branch" >> "$GITHUB_OUTPUT"
+          echo "reason=fix branch pushed" >> "$GITHUB_OUTPUT"
+
       - name: Publish API version run result
         if: ${{ always() }}
         shell: bash
         working-directory: project
+        env:
+          FIX_BRANCH_PUSHED: ${{ steps.push-fix.outputs.pushed }}
+          FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
+          FIX_BRANCH_REASON: ${{ steps.push-fix.outputs.reason }}
         run: |
           summary_file="${REPORT_DIR}/comparison-summary.env"
 
@@ -264,8 +330,13 @@ jobs:
             echo
             echo "### Patch"
             echo
-            echo "- O workflow gera apenas patch para review."
-            echo "- Não faz commit, push, merge nem altera a branch alvo."
+            if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
+              echo "- Branch de correção criada: \`${FIX_BRANCH_NAME}\`"
+            else
+              echo "- Branch de correção criada: não."
+              echo "- Motivo: ${FIX_BRANCH_REASON:-não aplicável}."
+            fi
+            echo "- Não faz merge automático nem altera diretamente a branch alvo."
             echo "- O resultado compara apenas o estado antes/depois do run atual. Não usa API externa nem histórico entre runs."
           } >> "$GITHUB_STEP_SUMMARY"
 
