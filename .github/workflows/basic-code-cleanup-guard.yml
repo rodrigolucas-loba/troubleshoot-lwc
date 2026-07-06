@@ -434,6 +434,79 @@ jobs:
             analyzer_insight="No analyzer findings were fixed by this cleanup."
           fi
 
+          prettier_fixed=$((prettier_warnings_before - prettier_warnings_after))
+          eslint_remaining="${eslint_problems_after}"
+          analyzer_remaining="${total_after:-0}"
+          classification_md="${REPORT_DIR}/cleanup-classification.md"
+          classification_json="${REPORT_DIR}/cleanup-classification.json"
+
+          {
+            echo "# Cleanup Classification"
+            echo
+            echo "## Auto-fixed"
+            echo
+            if [ "${prettier_fixed}" -gt 0 ]; then
+              echo "- Prettier formatting/code style warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}** (${prettier_fixed} fixed)"
+            else
+              echo "- Prettier formatting/code style warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
+            fi
+            echo "- Trailing whitespace lines removed: **${trailing_fixed}**"
+            echo "- Final newlines added: **${final_newlines}**"
+            echo "- Analyzer findings removed by this cleanup: **${fixed_findings:-0}**"
+            echo "- Patch generated for review: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
+            echo
+            echo "## Still needs manual or code-aware fix"
+            echo
+            echo "- ESLint problems remaining: **${eslint_remaining}** (${eslint_errors_after} errors, ${eslint_warnings_after} warnings)"
+            echo "- Analyzer findings remaining: **${analyzer_remaining}**"
+            echo "- New High/Critical findings introduced: **${new_high_or_critical:-0}**"
+            echo
+            echo "## Why analyzer only decreased by ${fixed_findings:-0}"
+            echo
+            echo "The analyzer only counts rules it reports, such as NoTrailingWhitespace. Formatting and indentation are measured separately by Prettier. Code-aware problems such as unused variables, no-use-before-define, no-unused-expressions, vars-on-top, and SLDS hardcoded values are not safe formatting fixes and should be reviewed separately."
+          } > "$classification_md"
+
+          node -e "
+            const fs = require('fs');
+            const data = {
+              autoFixed: {
+                prettierWarningsBefore: Number(process.argv[1]),
+                prettierWarningsAfter: Number(process.argv[2]),
+                prettierWarningsFixed: Number(process.argv[3]),
+                trailingWhitespaceLinesFixed: Number(process.argv[4]),
+                finalNewlinesAdded: Number(process.argv[5]),
+                analyzerFindingsFixed: Number(process.argv[6] || 0),
+                patchFilesChanged: Number(process.argv[7]),
+                patchInsertions: Number(process.argv[8]),
+                patchDeletions: Number(process.argv[9])
+              },
+              manualReview: {
+                eslintProblemsRemaining: Number(process.argv[10]),
+                eslintErrorsRemaining: Number(process.argv[11]),
+                eslintWarningsRemaining: Number(process.argv[12]),
+                analyzerFindingsRemaining: Number(process.argv[13]),
+                newHighOrCriticalFindings: Number(process.argv[14] || 0)
+              },
+              explanation: 'Analyzer findings, Prettier warnings, and ESLint problems are separate quality signals. Formatting can be auto-fixed; code-aware issues require review.'
+            };
+            fs.writeFileSync(process.argv[15], JSON.stringify(data, null, 2) + '\n');
+          " \
+            "${prettier_warnings_before}" \
+            "${prettier_warnings_after}" \
+            "${prettier_fixed}" \
+            "${trailing_fixed}" \
+            "${final_newlines}" \
+            "${fixed_findings:-0}" \
+            "${diff_files}" \
+            "${diff_insertions}" \
+            "${diff_deletions}" \
+            "${eslint_remaining}" \
+            "${eslint_errors_after}" \
+            "${eslint_warnings_after}" \
+            "${analyzer_remaining}" \
+            "${new_high_or_critical:-0}" \
+            "$classification_json"
+
           echo "Basic Code Cleanup Insight"
           echo "${analyzer_insight}"
           echo "Cleanup mode: ${{ inputs.cleanup_mode }}"
@@ -487,6 +560,8 @@ jobs:
             echo "| Analyzer findings after | ${total_after:-0} |"
             echo "| New High/Critical findings | ${new_high_or_critical:-0} |"
             echo
+            cat "$classification_md"
+            echo
             echo "The cleanup is not committed automatically. Apply the uploaded patch only after review."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -515,6 +590,8 @@ jobs:
             project/docs/basic-code-cleanup-guard/eslint-after.txt
             project/docs/basic-code-cleanup-guard/style-checks-before.json
             project/docs/basic-code-cleanup-guard/style-checks-after.json
+            project/docs/basic-code-cleanup-guard/cleanup-classification.md
+            project/docs/basic-code-cleanup-guard/cleanup-classification.json
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.patch
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.diffstat
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.numstat
