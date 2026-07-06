@@ -210,6 +210,49 @@ jobs:
 
           cat "${REPORT_DIR}/analyzer-comparison.md"
 
+      - name: Publish basic upgrade insight
+        if: ${{ always() }}
+        shell: bash
+        working-directory: project
+        run: |
+          summary_file="${REPORT_DIR}/comparison-summary.env"
+
+          if [ ! -f "$summary_file" ]; then
+            {
+              echo "## API Version Upgrade Insight"
+              echo
+              echo "Comparison summary was not generated. Check previous steps."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          set -a
+          . "$summary_file"
+          set +a
+
+          if [ "${fixed_findings:-0}" -gt 0 ]; then
+            insight="Fixed ${fixed_findings} analyzer finding(s)."
+          elif [ "${new_findings:-0}" -gt 0 ]; then
+            insight="No findings were fixed and ${new_findings} new finding(s) appeared."
+          else
+            insight="No analyzer findings were fixed by this API version update."
+          fi
+
+          {
+            echo "## API Version Upgrade Insight"
+            echo
+            echo "**${insight}**"
+            echo
+            echo "| Metric | Before | After | Delta |"
+            echo "| --- | ---: | ---: | ---: |"
+            echo "| Total findings | ${total_before:-0} | ${total_after:-0} | ${total_delta:-0} |"
+            echo "| API version findings | ${api_version_before:-0} | ${api_version_after:-0} | -${api_version_fixed:-0} fixed |"
+            echo "| New findings | 0 | ${new_findings:-0} | +${new_findings:-0} |"
+            echo "| New High/Critical findings | 0 | ${new_high_or_critical:-0} | +${new_high_or_critical:-0} |"
+            echo
+            echo "Detailed reports are available in the uploaded artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Optional deploy validate
         if: ${{ always() }}
         shell: bash
@@ -308,6 +351,7 @@ jobs:
             project/docs/api-version-upgrade-guard/analyzer-after.csv
             project/docs/api-version-upgrade-guard/analyzer-comparison.md
             project/docs/api-version-upgrade-guard/analyzer-comparison.json
+            project/docs/api-version-upgrade-guard/comparison-summary.env
             project/docs/api-version-upgrade-guard/api-version-upgrade-summary.html
             project/docs/api-version-upgrade-guard/deploy-validate.md
             project/docs/api-version-upgrade-guard/deploy-validate.json

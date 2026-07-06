@@ -366,7 +366,26 @@ ${deltaTable(fileRegressions)}
 `;
 
   await fs.writeFile(path.join(args.outDir, "api-version-upgrade-summary.html"), html, "utf8");
+  await fs.writeFile(
+    path.join(args.outDir, "comparison-summary.env"),
+    [
+      `total_before=${before.total}`,
+      `total_after=${after.total}`,
+      `total_delta=${delta.total}`,
+      `fixed_findings=${delta.removedFindings}`,
+      `new_findings=${delta.newFindings}`,
+      `new_high_or_critical=${delta.newHighOrCritical}`,
+      `api_version_before=${before.apiVersionRelated}`,
+      `api_version_after=${after.apiVersionRelated}`,
+      `api_version_fixed=${Math.max(0, before.apiVersionRelated - after.apiVersionRelated)}`,
+    ].join("\n") + "\n",
+    "utf8",
+  );
+
   console.log(decision);
+  console.log(`Fixed findings: ${delta.removedFindings}`);
+  console.log(`New findings: ${delta.newFindings}`);
+  console.log(`API version findings fixed: ${Math.max(0, before.apiVersionRelated - after.apiVersionRelated)}`);
 
   if (newHighOrCritical.length > 0) {
     console.warn("New high or critical findings appeared after the API version update. Check the report before applying the patch.");
