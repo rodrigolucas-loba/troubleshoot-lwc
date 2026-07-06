@@ -1,4 +1,5 @@
 name: Basic Code Cleanup Guard
+run-name: "Cleanup ${{ inputs.cleanup_mode }} on ${{ inputs.target_ref }}"
 
 on:
   workflow_dispatch:
@@ -14,13 +15,14 @@ on:
         default: "monitoring_loba_b_dev_ed_develop"
         type: string
       cleanup_mode:
-        description: "safe = whitespace/newline only; format = safe cleanup plus Prettier formatting"
+        description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint --fix"
         required: true
         default: "safe"
         type: choice
         options:
           - safe
           - format
+          - format_lintfix
 
 permissions:
   contents: read
@@ -193,7 +195,7 @@ jobs:
           report_md="${REPORT_DIR}/formatting-report.md"
           report_json="${REPORT_DIR}/formatting-report.json"
 
-          if [ "${{ inputs.cleanup_mode }}" != "format" ]; then
+          if [ "${{ inputs.cleanup_mode }}" = "safe" ]; then
             {
               echo "# Formatting Cleanup"
               echo
@@ -211,7 +213,7 @@ jobs:
             {
               echo "# Formatting Cleanup"
               echo
-              echo "- Mode: format"
+              echo "- Mode: ${{ inputs.cleanup_mode }}"
               echo "- Status: skipped"
               echo
               echo "package.json was not found, so Prettier could not be installed."
@@ -225,7 +227,7 @@ jobs:
             {
               echo "# Formatting Cleanup"
               echo
-              echo "- Mode: format"
+              echo "- Mode: ${{ inputs.cleanup_mode }}"
               echo "- Status: skipped"
               echo
               echo "Project style dependencies were not installed."
@@ -248,7 +250,7 @@ jobs:
           {
             echo "# Formatting Cleanup"
             echo
-            echo "- Mode: format"
+            echo "- Mode: ${{ inputs.cleanup_mode }}"
             echo "- Status: ${status}"
             echo "- Prettier exit code: ${prettier_code}"
             echo "- Scope: ${{ inputs.source_dir }}"
@@ -256,6 +258,70 @@ jobs:
 
           echo "{\"mode\":\"format\",\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${prettier_code}}" > "$report_json"
           echo "Formatting cleanup status: ${status}. Prettier exit code: ${prettier_code}."
+          exit 0
+
+      - name: Run optional ESLint auto-fix
+        shell: bash
+        working-directory: project
+        run: |
+          report_md="${REPORT_DIR}/eslint-fix-report.md"
+          report_json="${REPORT_DIR}/eslint-fix-report.json"
+          eslint_fix_log="${REPORT_DIR}/eslint-fix.txt"
+
+          if [ "${{ inputs.cleanup_mode }}" != "format_lintfix" ]; then
+            {
+              echo "# ESLint Auto-fix"
+              echo
+              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Status: skipped"
+              echo
+              echo "ESLint --fix was not requested."
+            } > "$report_md"
+            echo '{"enabled":false,"status":"skipped","eslintFixExitCode":0,"postFixPrettierExitCode":0}' > "$report_json"
+            echo "ESLint auto-fix skipped. cleanup_mode=${{ inputs.cleanup_mode }}."
+            exit 0
+          fi
+
+          if [ "${{ steps.project-deps.outputs.installed }}" != "true" ]; then
+            {
+              echo "# ESLint Auto-fix"
+              echo
+              echo "- Mode: format_lintfix"
+              echo "- Status: skipped"
+              echo
+              echo "Project style dependencies were not installed."
+            } > "$report_md"
+            echo '{"enabled":true,"status":"skipped_no_dependencies","eslintFixExitCode":0,"postFixPrettierExitCode":0}' > "$report_json"
+            echo "ESLint auto-fix skipped. Project style dependencies were not installed."
+            exit 0
+          fi
+
+          set +e
+          npx eslint **/{aura,lwc}/**/*.js --fix > "$eslint_fix_log" 2>&1
+          eslint_fix_code=$?
+
+          npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
+          post_fix_prettier_code=$?
+
+          if [ "$eslint_fix_code" -eq 0 ]; then
+            status="completed"
+          else
+            status="completed_with_remaining_lint"
+          fi
+
+          {
+            echo "# ESLint Auto-fix"
+            echo
+            echo "- Mode: format_lintfix"
+            echo "- Status: ${status}"
+            echo "- ESLint --fix exit code: ${eslint_fix_code}"
+            echo "- Post-fix Prettier exit code: ${post_fix_prettier_code}"
+            echo
+            echo "ESLint --fix may still exit non-zero when non-fixable lint problems remain."
+          } > "$report_md"
+
+          echo "{\"enabled\":true,\"status\":\"${status}\",\"eslintFixExitCode\":${eslint_fix_code},\"postFixPrettierExitCode\":${post_fix_prettier_code}}" > "$report_json"
+          echo "ESLint auto-fix status: ${status}. ESLint --fix exit code: ${eslint_fix_code}. Post-fix Prettier exit code: ${post_fix_prettier_code}."
           exit 0
 
       - name: Run style checks after cleanup
@@ -353,6 +419,7 @@ jobs:
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
           formatting_json="${REPORT_DIR}/formatting-report.json"
+          eslint_fix_json="${REPORT_DIR}/eslint-fix-report.json"
           style_before_json="${REPORT_DIR}/style-checks-before.json"
           style_after_json="${REPORT_DIR}/style-checks-after.json"
           summary_file="${REPORT_DIR}/comparison-summary.env"
@@ -374,6 +441,14 @@ jobs:
           else
             formatter_status="missing_report"
             formatter_exit_code=0
+          fi
+
+          if [ -f "$eslint_fix_json" ]; then
+            eslint_fix_status="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.status || 'unknown')" "$eslint_fix_json")"
+            eslint_fix_exit_code="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.eslintFixExitCode ?? 0)" "$eslint_fix_json")"
+          else
+            eslint_fix_status="missing_report"
+            eslint_fix_exit_code=0
           fi
 
           if [ -f "$style_before_json" ]; then
@@ -435,10 +510,23 @@ jobs:
           fi
 
           prettier_fixed=$((prettier_warnings_before - prettier_warnings_after))
+          eslint_fixed=$((eslint_problems_before - eslint_problems_after))
           eslint_remaining="${eslint_problems_after}"
           analyzer_remaining="${total_after:-0}"
           classification_md="${REPORT_DIR}/cleanup-classification.md"
           classification_json="${REPORT_DIR}/cleanup-classification.json"
+          operator_guide_md="${REPORT_DIR}/operator-guide.md"
+
+          if [ "${new_high_or_critical:-0}" -gt 0 ]; then
+            operator_decision="DO NOT APPLY"
+            operator_reason="New High/Critical findings appeared after cleanup."
+          elif [ "${diff_files}" -gt 0 ]; then
+            operator_decision="REVIEW PATCH"
+            operator_reason="The workflow generated a cleanup patch. Review it before creating a PR."
+          else
+            operator_decision="NO ACTION"
+            operator_reason="No cleanup patch was generated."
+          fi
 
           {
             echo "# Cleanup Classification"
@@ -453,6 +541,12 @@ jobs:
             echo "- Trailing whitespace lines removed: **${trailing_fixed}**"
             echo "- Final newlines added: **${final_newlines}**"
             echo "- Analyzer findings removed by this cleanup: **${fixed_findings:-0}**"
+            if [ "${eslint_fixed}" -gt 0 ]; then
+              echo "- ESLint auto-fix problems reduced: **${eslint_problems_before} -> ${eslint_problems_after}** (${eslint_fixed} fixed)"
+            else
+              echo "- ESLint auto-fix problems reduced: **${eslint_problems_before} -> ${eslint_problems_after}**"
+            fi
+            echo "- ESLint auto-fix status: **${eslint_fix_status}**"
             echo "- Patch generated for review: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
             echo
             echo "## Still needs manual or code-aware fix"
@@ -466,6 +560,58 @@ jobs:
             echo "The analyzer only counts rules it reports, such as NoTrailingWhitespace. Formatting and indentation are measured separately by Prettier. Code-aware problems such as unused variables, no-use-before-define, no-unused-expressions, vars-on-top, and SLDS hardcoded values are not safe formatting fixes and should be reviewed separately."
           } > "$classification_md"
 
+          {
+            echo "# Basic Code Cleanup Guard Operator Guide"
+            echo
+            echo "## Decision"
+            echo
+            echo "- Recommendation: **${operator_decision}**"
+            echo "- Reason: ${operator_reason}"
+            echo "- Cleanup mode: \`${{ inputs.cleanup_mode }}\`"
+            echo "- Target ref: \`${{ inputs.target_ref }}\`"
+            echo "- Source dir: \`${{ inputs.source_dir }}\`"
+            echo
+            echo "## What this run did"
+            echo
+            echo "- Generated a reviewable patch only; it did not commit, push, merge, or modify the target branch."
+            echo "- Ran Salesforce Code Analyzer before and after cleanup."
+            echo "- Ran Prettier checks before and after cleanup."
+            echo "- Ran ESLint checks before and after cleanup."
+            echo "- Uploaded all reports and the patch as an artifact."
+            echo
+            echo "## Mode guide"
+            echo
+            echo "- \`safe\`: lowest risk; removes trailing whitespace and adds missing final newlines."
+            echo "- \`format\`: recommended for this POC; runs safe cleanup plus Prettier formatting."
+            echo "- \`format_lintfix\`: most aggressive; runs format plus ESLint --fix, still requiring patch review."
+            echo
+            echo "## Apply patch manually"
+            echo
+            echo "\`\`\`powershell"
+            echo "cd C:\\Users\\rodri\\Desktop\\troubleshoot-lwc"
+            echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name basic-code-cleanup-guard-${{ github.run_number }} --dir cleanup-artifact"
+            echo "git fetch origin ${{ inputs.target_ref }}"
+            echo "git switch -c apply-basic-cleanup-${{ github.run_number }} origin/${{ inputs.target_ref }}"
+            echo "git apply cleanup-artifact\\basic-code-cleanup.patch"
+            echo "git status"
+            echo "\`\`\`"
+            echo
+            echo "After reviewing the diff and running any needed tests:"
+            echo
+            echo "\`\`\`powershell"
+            echo "git add ."
+            echo "git commit -m \"Apply basic code cleanup\""
+            echo "git push --set-upstream origin apply-basic-cleanup-${{ github.run_number }}"
+            echo "\`\`\`"
+            echo
+            echo "## Review checklist"
+            echo
+            echo "- Confirm no functional files changed unexpectedly."
+            echo "- Confirm no new High/Critical analyzer findings appeared."
+            echo "- Confirm Prettier warnings and analyzer deltas make sense."
+            echo "- Review ESLint remaining problems as separate code-aware work."
+          } > "$operator_guide_md"
+
           node -e "
             const fs = require('fs');
             const data = {
@@ -476,20 +622,28 @@ jobs:
                 trailingWhitespaceLinesFixed: Number(process.argv[4]),
                 finalNewlinesAdded: Number(process.argv[5]),
                 analyzerFindingsFixed: Number(process.argv[6] || 0),
-                patchFilesChanged: Number(process.argv[7]),
-                patchInsertions: Number(process.argv[8]),
-                patchDeletions: Number(process.argv[9])
+                eslintProblemsBefore: Number(process.argv[7]),
+                eslintProblemsAfter: Number(process.argv[8]),
+                eslintProblemsFixed: Number(process.argv[9]),
+                eslintFixStatus: process.argv[10],
+                patchFilesChanged: Number(process.argv[11]),
+                patchInsertions: Number(process.argv[12]),
+                patchDeletions: Number(process.argv[13])
               },
               manualReview: {
-                eslintProblemsRemaining: Number(process.argv[10]),
-                eslintErrorsRemaining: Number(process.argv[11]),
-                eslintWarningsRemaining: Number(process.argv[12]),
-                analyzerFindingsRemaining: Number(process.argv[13]),
-                newHighOrCriticalFindings: Number(process.argv[14] || 0)
+                eslintProblemsRemaining: Number(process.argv[14]),
+                eslintErrorsRemaining: Number(process.argv[15]),
+                eslintWarningsRemaining: Number(process.argv[16]),
+                analyzerFindingsRemaining: Number(process.argv[17]),
+                newHighOrCriticalFindings: Number(process.argv[18] || 0)
+              },
+              operatorDecision: {
+                recommendation: process.argv[19],
+                reason: process.argv[20]
               },
               explanation: 'Analyzer findings, Prettier warnings, and ESLint problems are separate quality signals. Formatting can be auto-fixed; code-aware issues require review.'
             };
-            fs.writeFileSync(process.argv[15], JSON.stringify(data, null, 2) + '\n');
+            fs.writeFileSync(process.argv[21], JSON.stringify(data, null, 2) + '\n');
           " \
             "${prettier_warnings_before}" \
             "${prettier_warnings_after}" \
@@ -497,6 +651,10 @@ jobs:
             "${trailing_fixed}" \
             "${final_newlines}" \
             "${fixed_findings:-0}" \
+            "${eslint_problems_before}" \
+            "${eslint_problems_after}" \
+            "${eslint_fixed}" \
+            "${eslint_fix_status}" \
             "${diff_files}" \
             "${diff_insertions}" \
             "${diff_deletions}" \
@@ -505,9 +663,13 @@ jobs:
             "${eslint_warnings_after}" \
             "${analyzer_remaining}" \
             "${new_high_or_critical:-0}" \
+            "${operator_decision}" \
+            "${operator_reason}" \
             "$classification_json"
 
           echo "Basic Code Cleanup Insight"
+          echo "Operator decision: ${operator_decision}"
+          echo "Decision reason: ${operator_reason}"
           echo "${analyzer_insight}"
           echo "Cleanup mode: ${{ inputs.cleanup_mode }}"
           echo "Files changed by cleanup: ${changed_files}"
@@ -515,6 +677,8 @@ jobs:
           echo "Final newlines added: ${final_newlines}"
           echo "Formatter status: ${formatter_status}"
           echo "Formatter exit code: ${formatter_exit_code}"
+          echo "ESLint auto-fix status: ${eslint_fix_status}"
+          echo "ESLint auto-fix exit code: ${eslint_fix_exit_code}"
           echo "Prettier verify exit code: ${prettier_before} -> ${prettier_after}"
           echo "Prettier warnings: ${prettier_warnings_before} -> ${prettier_warnings_after}"
           echo "ESLint exit code: ${eslint_before} -> ${eslint_after}"
@@ -526,21 +690,30 @@ jobs:
           echo "Patch deletions: ${diff_deletions}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "New High/Critical findings: ${new_high_or_critical:-0}"
-          echo "::notice title=Basic cleanup insight::${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. Prettier warnings: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint problems: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}."
+          echo "::notice title=Basic cleanup insight::${operator_decision}. ${analyzer_insight} Cleanup files: ${changed_files}. Patch files: ${diff_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. ESLint fix: ${eslint_fix_status}. Prettier warnings: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint problems: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}."
 
           {
             echo "## Basic Code Cleanup Insight"
+            echo
+            echo "### Operator decision"
+            echo
+            echo "**${operator_decision}**"
+            echo
+            echo "${operator_reason}"
             echo
             echo "**${analyzer_insight}**"
             echo
             echo "| Metric | Count |"
             echo "| --- | ---: |"
             echo "| Cleanup mode | ${{ inputs.cleanup_mode }} |"
+            echo "| Operator decision | ${operator_decision} |"
             echo "| Files changed by cleanup | ${changed_files} |"
             echo "| Trailing whitespace lines fixed | ${trailing_fixed} |"
             echo "| Final newlines added | ${final_newlines} |"
             echo "| Formatter status | ${formatter_status} |"
             echo "| Formatter exit code | ${formatter_exit_code} |"
+            echo "| ESLint auto-fix status | ${eslint_fix_status} |"
+            echo "| ESLint auto-fix exit code | ${eslint_fix_exit_code} |"
             echo "| Prettier verify exit code before | ${prettier_before} |"
             echo "| Prettier verify exit code after | ${prettier_after} |"
             echo "| Prettier warnings before | ${prettier_warnings_before} |"
@@ -549,6 +722,7 @@ jobs:
             echo "| ESLint exit code after | ${eslint_after} |"
             echo "| ESLint problems before | ${eslint_problems_before} |"
             echo "| ESLint problems after | ${eslint_problems_after} |"
+            echo "| ESLint problems fixed | ${eslint_fixed} |"
             echo "| ESLint errors before | ${eslint_errors_before} |"
             echo "| ESLint errors after | ${eslint_errors_after} |"
             echo "| ESLint warnings before | ${eslint_warnings_before} |"
@@ -561,6 +735,8 @@ jobs:
             echo "| New High/Critical findings | ${new_high_or_critical:-0} |"
             echo
             cat "$classification_md"
+            echo
+            cat "$operator_guide_md"
             echo
             echo "The cleanup is not committed automatically. Apply the uploaded patch only after review."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -584,6 +760,9 @@ jobs:
             project/docs/basic-code-cleanup-guard/style-dependencies-report.json
             project/docs/basic-code-cleanup-guard/formatting-report.md
             project/docs/basic-code-cleanup-guard/formatting-report.json
+            project/docs/basic-code-cleanup-guard/eslint-fix-report.md
+            project/docs/basic-code-cleanup-guard/eslint-fix-report.json
+            project/docs/basic-code-cleanup-guard/eslint-fix.txt
             project/docs/basic-code-cleanup-guard/prettier-before.txt
             project/docs/basic-code-cleanup-guard/prettier-after.txt
             project/docs/basic-code-cleanup-guard/eslint-before.txt
@@ -592,6 +771,7 @@ jobs:
             project/docs/basic-code-cleanup-guard/style-checks-after.json
             project/docs/basic-code-cleanup-guard/cleanup-classification.md
             project/docs/basic-code-cleanup-guard/cleanup-classification.json
+            project/docs/basic-code-cleanup-guard/operator-guide.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.patch
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.diffstat
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.numstat
