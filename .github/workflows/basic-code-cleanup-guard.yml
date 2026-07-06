@@ -144,13 +144,14 @@ jobs:
           set +e
           npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
-          prettier_warnings=$(grep -c '\[warn\]' "$prettier_log" || true)
+          prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
           npm run lint > "$eslint_log" 2>&1
           eslint_code=$?
-          eslint_problems=$(grep -Eo '[0-9]+ problems?' "$eslint_log" | tail -1 | awk '{print $1}')
-          eslint_errors=$(grep -Eo '[0-9]+ errors?' "$eslint_log" | tail -1 | awk '{print $1}')
-          eslint_warnings=$(grep -Eo '[0-9]+ warnings?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_summary=$(grep -E '[0-9]+ problems? \(' "$eslint_log" | tail -1 || true)
+          eslint_problems=$(echo "$eslint_summary" | grep -Eo '[0-9]+ problems?' | awk '{print $1}')
+          eslint_errors=$(echo "$eslint_summary" | grep -Eo '[0-9]+ errors?' | awk '{print $1}')
+          eslint_warnings=$(echo "$eslint_summary" | grep -Eo '[0-9]+ warnings?' | awk '{print $1}')
           eslint_problems=${eslint_problems:-0}
           eslint_errors=${eslint_errors:-0}
           eslint_warnings=${eslint_warnings:-0}
@@ -275,13 +276,14 @@ jobs:
           set +e
           npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
-          prettier_warnings=$(grep -c '\[warn\]' "$prettier_log" || true)
+          prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
           npm run lint > "$eslint_log" 2>&1
           eslint_code=$?
-          eslint_problems=$(grep -Eo '[0-9]+ problems?' "$eslint_log" | tail -1 | awk '{print $1}')
-          eslint_errors=$(grep -Eo '[0-9]+ errors?' "$eslint_log" | tail -1 | awk '{print $1}')
-          eslint_warnings=$(grep -Eo '[0-9]+ warnings?' "$eslint_log" | tail -1 | awk '{print $1}')
+          eslint_summary=$(grep -E '[0-9]+ problems? \(' "$eslint_log" | tail -1 || true)
+          eslint_problems=$(echo "$eslint_summary" | grep -Eo '[0-9]+ problems?' | awk '{print $1}')
+          eslint_errors=$(echo "$eslint_summary" | grep -Eo '[0-9]+ errors?' | awk '{print $1}')
+          eslint_warnings=$(echo "$eslint_summary" | grep -Eo '[0-9]+ warnings?' | awk '{print $1}')
           eslint_problems=${eslint_problems:-0}
           eslint_errors=${eslint_errors:-0}
           eslint_warnings=${eslint_warnings:-0}
