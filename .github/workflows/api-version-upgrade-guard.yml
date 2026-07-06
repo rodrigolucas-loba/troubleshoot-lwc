@@ -371,6 +371,35 @@ jobs:
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         run: |
           summary_file="${REPORT_DIR}/comparison-summary.env"
+          deploy_log="${REPORT_DIR}/deploy-validation.log"
+
+          append_deploy_validation_summary() {
+            echo "### Validação Salesforce"
+            echo
+            if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+              echo "- Estado: não executado."
+              return
+            fi
+
+            echo "- Estado: **${DEPLOY_VALIDATION_STATUS:-failed}**"
+            echo "- Exit code: **${DEPLOY_VALIDATION_EXIT_CODE:-unknown}**"
+
+            if [ -f "$deploy_log" ]; then
+              echo
+              echo "<details>"
+              echo "<summary>Output principal da validação</summary>"
+              echo
+              echo '```text'
+              perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g' "$deploy_log" \
+                | grep -E '^(Status:|Deploy ID:|Test Failures|Passing:|Failing:|Total:|Error \(|.*Average test coverage.*|.*at least [0-9]+%.*|.*FIELD_CUSTOM_VALIDATION_EXCEPTION.*|.*CANNOT_EXECUTE_FLOW_TRIGGER.*|.*System\.AssertException.*|.*Class\..*: line .*|.*• .*)' \
+                | head -n 80 || true
+              echo '```'
+              echo
+              echo "</details>"
+            else
+              echo "- Output: log de validação não encontrado."
+            fi
+          }
 
           if [ ! -f "$summary_file" ]; then
             {
@@ -439,6 +468,9 @@ jobs:
             else
               echo "- Deploy validation: não executado."
             fi
+            echo
+            append_deploy_validation_summary
+            echo
             echo "- Não faz merge automático nem altera diretamente a branch alvo."
             echo "- O resultado compara apenas o estado antes/depois do run atual. Não usa API externa nem histórico entre runs."
           } >> "$GITHUB_STEP_SUMMARY"

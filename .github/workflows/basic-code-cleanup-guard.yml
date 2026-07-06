@@ -605,6 +605,35 @@ jobs:
           style_after_json="${REPORT_DIR}/style-checks-after.json"
           summary_file="${REPORT_DIR}/comparison-summary.env"
           diff_summary_file="${REPORT_DIR}/diff-summary.env"
+          deploy_log="${REPORT_DIR}/deploy-validation.log"
+
+          append_deploy_validation_summary() {
+            echo "### Validação Salesforce"
+            echo
+            if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+              echo "- Estado: não executado."
+              return
+            fi
+
+            echo "- Estado: **${DEPLOY_VALIDATION_STATUS:-failed}**"
+            echo "- Exit code: **${DEPLOY_VALIDATION_EXIT_CODE:-unknown}**"
+
+            if [ -f "$deploy_log" ]; then
+              echo
+              echo "<details>"
+              echo "<summary>Output principal da validação</summary>"
+              echo
+              echo '```text'
+              perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g' "$deploy_log" \
+                | grep -E '^(Status:|Deploy ID:|Test Failures|Passing:|Failing:|Total:|Error \(|.*Average test coverage.*|.*at least [0-9]+%.*|.*FIELD_CUSTOM_VALIDATION_EXCEPTION.*|.*CANNOT_EXECUTE_FLOW_TRIGGER.*|.*System\.AssertException.*|.*Class\..*: line .*|.*• .*)' \
+                | head -n 80 || true
+              echo '```'
+              echo
+              echo "</details>"
+            else
+              echo "- Output: log de validação não encontrado."
+            fi
+          }
 
           if [ -f "$cleanup_json" ]; then
             changed_files="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.changedFiles || 0)" "$cleanup_json")"
@@ -870,6 +899,8 @@ jobs:
             else
               echo "- Deploy validation: não executado."
             fi
+            echo
+            append_deploy_validation_summary
             echo
             cat "$operator_guide_md"
           } >> "$GITHUB_STEP_SUMMARY"
