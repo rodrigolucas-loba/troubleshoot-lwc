@@ -13,6 +13,14 @@ on:
         required: true
         default: "monitoring_loba_b_dev_ed_develop"
         type: string
+      cleanup_mode:
+        description: "safe = whitespace/newline only; format = safe cleanup plus Prettier formatting"
+        required: true
+        default: "safe"
+        type: choice
+        options:
+          - safe
+          - format
 
 permissions:
   contents: read
@@ -99,6 +107,80 @@ jobs:
             --report "${REPORT_DIR}/basic-code-cleanup-report.md" \
             --json "${REPORT_DIR}/basic-code-cleanup-report.json"
 
+      - name: Run optional formatter cleanup
+        shell: bash
+        working-directory: project
+        run: |
+          report_md="${REPORT_DIR}/formatting-report.md"
+          report_json="${REPORT_DIR}/formatting-report.json"
+
+          if [ "${{ inputs.cleanup_mode }}" != "format" ]; then
+            {
+              echo "# Formatting Cleanup"
+              echo
+              echo "- Mode: safe"
+              echo "- Status: skipped"
+              echo
+              echo "Prettier formatting was not requested."
+            } > "$report_md"
+            echo '{"mode":"safe","enabled":false,"status":"skipped","exitCode":0}' > "$report_json"
+            echo "Formatting cleanup skipped. cleanup_mode=safe."
+            exit 0
+          fi
+
+          if [ ! -f package.json ]; then
+            {
+              echo "# Formatting Cleanup"
+              echo
+              echo "- Mode: format"
+              echo "- Status: skipped"
+              echo
+              echo "package.json was not found, so Prettier could not be installed."
+            } > "$report_md"
+            echo '{"mode":"format","enabled":true,"status":"skipped_no_package_json","exitCode":0}' > "$report_json"
+            echo "Formatting cleanup skipped. package.json was not found."
+            exit 0
+          fi
+
+          set +e
+          npm install --no-save --no-package-lock
+          install_code=$?
+
+          if [ "$install_code" -ne 0 ]; then
+            {
+              echo "# Formatting Cleanup"
+              echo
+              echo "- Mode: format"
+              echo "- Status: npm install failed"
+              echo "- Exit code: ${install_code}"
+            } > "$report_md"
+            echo "{\"mode\":\"format\",\"enabled\":true,\"status\":\"npm_install_failed\",\"exitCode\":${install_code}}" > "$report_json"
+            echo "Formatting cleanup failed during npm install."
+            exit 0
+          fi
+
+          npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
+          prettier_code=$?
+
+          if [ "$prettier_code" -eq 0 ]; then
+            status="completed"
+          else
+            status="prettier_failed"
+          fi
+
+          {
+            echo "# Formatting Cleanup"
+            echo
+            echo "- Mode: format"
+            echo "- Status: ${status}"
+            echo "- Prettier exit code: ${prettier_code}"
+            echo "- Scope: ${{ inputs.source_dir }}"
+          } > "$report_md"
+
+          echo "{\"mode\":\"format\",\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${prettier_code}}" > "$report_json"
+          echo "Formatting cleanup status: ${status}. Prettier exit code: ${prettier_code}."
+          exit 0
+
       - name: Save cleanup patch
         shell: bash
         working-directory: project
@@ -144,6 +226,7 @@ jobs:
         working-directory: project
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
+          formatting_json="${REPORT_DIR}/formatting-report.json"
           summary_file="${REPORT_DIR}/comparison-summary.env"
 
           if [ -f "$cleanup_json" ]; then
@@ -154,6 +237,14 @@ jobs:
             changed_files=0
             trailing_fixed=0
             final_newlines=0
+          fi
+
+          if [ -f "$formatting_json" ]; then
+            formatter_status="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.status || 'unknown')" "$formatting_json")"
+            formatter_exit_code="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.exitCode ?? 0)" "$formatting_json")"
+          else
+            formatter_status="missing_report"
+            formatter_exit_code=0
           fi
 
           if [ -f "$summary_file" ]; then
@@ -172,6 +263,18 @@ jobs:
             analyzer_insight="No analyzer findings were fixed by this cleanup."
           fi
 
+          echo "Basic Code Cleanup Insight"
+          echo "${analyzer_insight}"
+          echo "Cleanup mode: ${{ inputs.cleanup_mode }}"
+          echo "Files changed by cleanup: ${changed_files}"
+          echo "Trailing whitespace lines fixed: ${trailing_fixed}"
+          echo "Final newlines added: ${final_newlines}"
+          echo "Formatter status: ${formatter_status}"
+          echo "Formatter exit code: ${formatter_exit_code}"
+          echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
+          echo "New High/Critical findings: ${new_high_or_critical:-0}"
+          echo "::notice title=Basic cleanup insight::${analyzer_insight} Files changed: ${changed_files}. Trailing whitespace fixed: ${trailing_fixed}. Final newlines added: ${final_newlines}. Formatter: ${formatter_status}. Findings: ${total_before:-0} -> ${total_after:-0}."
+
           {
             echo "## Basic Code Cleanup Insight"
             echo
@@ -179,9 +282,12 @@ jobs:
             echo
             echo "| Metric | Count |"
             echo "| --- | ---: |"
+            echo "| Cleanup mode | ${{ inputs.cleanup_mode }} |"
             echo "| Files changed by cleanup | ${changed_files} |"
             echo "| Trailing whitespace lines fixed | ${trailing_fixed} |"
             echo "| Final newlines added | ${final_newlines} |"
+            echo "| Formatter status | ${formatter_status} |"
+            echo "| Formatter exit code | ${formatter_exit_code} |"
             echo "| Analyzer findings before | ${total_before:-0} |"
             echo "| Analyzer findings after | ${total_after:-0} |"
             echo "| New High/Critical findings | ${new_high_or_critical:-0} |"
@@ -204,6 +310,8 @@ jobs:
           path: |
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json
+            project/docs/basic-code-cleanup-guard/formatting-report.md
+            project/docs/basic-code-cleanup-guard/formatting-report.json
             project/docs/basic-code-cleanup-guard/basic-code-cleanup.patch
             project/docs/basic-code-cleanup-guard/changed-files.txt
             project/docs/basic-code-cleanup-guard/analyzer-before.csv
