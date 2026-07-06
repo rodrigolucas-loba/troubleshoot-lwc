@@ -514,14 +514,14 @@ jobs:
           operator_guide_md="${REPORT_DIR}/resumo-operacional.md"
 
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
-            operator_decision="DO NOT APPLY"
-            operator_reason="New High/Critical findings appeared after cleanup."
+            operator_decision="NAO APLICAR"
+            operator_reason="Surgiram novos findings High/Critical depois da limpeza."
           elif [ "${diff_files}" -gt 0 ]; then
-            operator_decision="REVIEW PATCH"
-            operator_reason="The workflow generated a cleanup patch. Review it before creating a PR."
+            operator_decision="REVER PATCH"
+            operator_reason="O workflow gerou um patch de limpeza para rever antes de criar PR."
           else
-            operator_decision="NO ACTION"
-            operator_reason="No cleanup patch was generated."
+            operator_decision="SEM ACAO"
+            operator_reason="Nao foi gerado patch de limpeza."
           fi
 
           {
