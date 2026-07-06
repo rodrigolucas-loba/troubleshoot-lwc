@@ -485,7 +485,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$fix_branch"
           git add --pathspec-from-file="$changed_file"
-          git commit -m "Apply basic code cleanup"
+          git commit --no-verify -m "Apply basic code cleanup"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git push --set-upstream origin "$fix_branch"
 
