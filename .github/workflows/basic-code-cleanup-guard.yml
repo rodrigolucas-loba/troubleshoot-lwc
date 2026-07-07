@@ -622,6 +622,11 @@ jobs:
 
             echo "- Estado: **${DEPLOY_VALIDATION_STATUS:-failed}**"
             echo "- Exit code: **${DEPLOY_VALIDATION_EXIT_CODE:-unknown}**"
+            if [ "${DEPLOY_VALIDATION_STATUS:-failed}" = "passed" ]; then
+              echo "- Recomendação: **SAFE TO MERGE** do ponto de vista da validação Salesforce."
+            else
+              echo "- Recomendação: **NÃO É SAFE JUNTAR** com base nesta validação Salesforce."
+            fi
             if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
               echo "- Enforcement: **ativo**"
             else
