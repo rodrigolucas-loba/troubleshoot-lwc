@@ -613,19 +613,19 @@ jobs:
           deploy_log="${REPORT_DIR}/deploy-validation.log"
 
           append_deploy_validation_summary() {
-            echo "### Validação Salesforce"
+            echo "### Salesforce Deployment Validation"
             echo
             if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
-              echo "- Estado: não executado."
+              echo "- Status: not executed."
               return
             fi
 
-            echo "- Estado: **${DEPLOY_VALIDATION_STATUS:-failed}**"
+            echo "- Status: **${DEPLOY_VALIDATION_STATUS:-failed}**"
             echo "- Exit code: **${DEPLOY_VALIDATION_EXIT_CODE:-unknown}**"
             if [ "${DEPLOY_VALIDATION_STATUS:-failed}" = "passed" ]; then
-              echo "- Recomendação: **SAFE TO MERGE** do ponto de vista da validação Salesforce."
+              echo "- Merge recommendation: **SAFE TO MERGE** based on Salesforce deployment validation."
             else
-              echo "- Recomendação: **NÃO É SAFE JUNTAR** com base nesta validação Salesforce."
+              echo "- Merge recommendation: **NOT SAFE TO MERGE** based on Salesforce deployment validation."
             fi
             if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
               echo "- Enforcement: **ativo**"
@@ -636,7 +636,7 @@ jobs:
             if [ -f "$deploy_log" ]; then
               echo
               echo "<details>"
-              echo "<summary>Output principal da validação</summary>"
+              echo "<summary>Main validation output</summary>"
               echo
               echo '```text'
               perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g' "$deploy_log" \
@@ -646,7 +646,7 @@ jobs:
               echo
               echo "</details>"
             else
-              echo "- Output: log de validação não encontrado."
+              echo "- Output: validation log not found."
             fi
           }
 
@@ -786,7 +786,7 @@ jobs:
             echo
             echo "## Decisão"
             echo
-            echo "- Recomendação: **${operator_decision}**"
+            echo "- Recommendation: **${operator_decision}**"
             echo "- Motivo: ${operator_reason}"
             echo "- Modo: \`${{ inputs.cleanup_mode }}\`"
             echo
