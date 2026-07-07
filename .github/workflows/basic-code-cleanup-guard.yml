@@ -49,7 +49,7 @@ on:
         default: "RunLocalTests"
         type: choice
         options:
-          - NoTestRun
+          - RunRelevantTests
           - RunLocalTests
           - RunAllTestsInOrg
       deploy_wait_minutes:
