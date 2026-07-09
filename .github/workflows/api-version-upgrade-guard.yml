@@ -24,10 +24,15 @@ on:
         required: true
         default: true
         type: boolean
+      create_pull_request:
+        description: "Open a pull request when a fix branch is pushed"
+        required: true
+        default: true
+        type: boolean
       fix_branch_prefix:
         description: "Prefix for the generated fix branch"
         required: true
-        default: "auto/api-version-upgrade"
+        default: "auto/api-version"
         type: string
       run_deploy_validate:
         description: "Validate deployment in Salesforce before pushing the fix branch"
@@ -42,7 +47,7 @@ on:
       test_level:
         description: "Salesforce deploy validation test level"
         required: true
-        default: "RunLocalTests"
+        default: "RunRelevantTests"
         type: choice
         options:
           - RunRelevantTests
@@ -56,6 +61,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   SF_CLI_VERSION: "2.133.4"
@@ -146,13 +152,16 @@ jobs:
         working-directory: project
         run: |
           $reportDir = $env:REPORT_DIR
-          git diff --name-only | Set-Content "$reportDir/changed-files.txt"
+          $changedFilesPath = "$reportDir/changed-files.txt"
+          $changedNames = @(git diff --name-only | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          New-Item -ItemType File -Path $changedFilesPath -Force | Out-Null
+          Set-Content -Path $changedFilesPath -Value $changedNames
 
           $report = Get-Content "$reportDir/api-version-upgrade-report.json" -Raw | ConvertFrom-Json
           $temporaryFiles = @($report.temporaryFiles)
           $invalid = New-Object System.Collections.Generic.List[string]
 
-          $changedFiles = @(Get-Content "$reportDir/changed-files.txt" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          $changedFiles = @(Get-Content $changedFilesPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
           foreach ($file in $changedFiles) {
             if ($file -eq "sfdx-project.json") {
@@ -231,7 +240,7 @@ jobs:
             --after "${REPORT_DIR}/analyzer-after.csv" \
             --out-dir "${REPORT_DIR}" \
             --target-api "${{ inputs.target_api_version }}" \
-            --target-ref "<target-ref>" \
+            --target-ref "${{ inputs.target_ref }}" \
             --source-dir "${{ inputs.source_dir }}" \
             --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
             --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
@@ -326,10 +335,9 @@ jobs:
           summary_file="${REPORT_DIR}/comparison-summary.env"
           changed_file="${REPORT_DIR}/changed-files.txt"
 
-          echo "pushed=false" >> "$GITHUB_OUTPUT"
-          echo "branch=" >> "$GITHUB_OUTPUT"
-
           if [ ! -f "$summary_file" ] || [ ! -f "$changed_file" ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
             echo "reason=missing comparison or changed-files report" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -341,16 +349,20 @@ jobs:
           changed_count="$(grep -cve '^[[:space:]]*$' "$changed_file" || true)"
 
           if [ "$changed_count" -eq 0 ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
             echo "reason=no files changed" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
             echo "reason=new High/Critical findings detected" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          fix_branch="${{ inputs.fix_branch_prefix }}/run-${{ github.run_number }}-${{ github.run_attempt }}"
+          fix_branch="${{ inputs.fix_branch_prefix }}/run-${{ github.run_id }}-${{ github.run_attempt }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -364,6 +376,58 @@ jobs:
           echo "branch=$fix_branch" >> "$GITHUB_OUTPUT"
           echo "reason=fix branch pushed" >> "$GITHUB_OUTPUT"
 
+      - name: Open API version fix pull request
+        id: fix-pr
+        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
+        uses: actions/github-script@v7
+        env:
+          FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
+          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_API_VERSION: ${{ inputs.target_api_version }}
+          SOURCE_DIR: ${{ inputs.source_dir }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.FIX_BRANCH_NAME;
+            const base = process.env.TARGET_REF;
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head: `${owner}:${head}`,
+              base
+            });
+
+            if (existing.data.length) {
+              core.setOutput('url', existing.data[0].html_url);
+              core.info(`Existing PR found: ${existing.data[0].html_url}`);
+              return;
+            }
+
+            const body = [
+              'Automated API version cleanup generated by the API Version Upgrade Guard.',
+              '',
+              `- Target API version: ${process.env.TARGET_API_VERSION}`,
+              `- Source directory: ${process.env.SOURCE_DIR}`,
+              `- Workflow run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+              '',
+              'Review the patch and workflow artifacts before merging.'
+            ].join('\n');
+
+            const pull = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: `Apply API version cleanup (${process.env.TARGET_API_VERSION})`,
+              head,
+              base,
+              body
+            });
+
+            core.setOutput('url', pull.data.html_url);
+            core.info(`Created PR: ${pull.data.html_url}`);
+
       - name: Publish API version run result
         if: ${{ always() }}
         shell: bash
@@ -372,6 +436,7 @@ jobs:
           FIX_BRANCH_PUSHED: ${{ steps.push-fix.outputs.pushed }}
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           FIX_BRANCH_REASON: ${{ steps.push-fix.outputs.reason }}
+          FIX_PR_URL: ${{ steps.fix-pr.outputs.url }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         run: |
@@ -389,14 +454,14 @@ jobs:
             echo "- Status: **${DEPLOY_VALIDATION_STATUS:-failed}**"
             echo "- Exit code: **${DEPLOY_VALIDATION_EXIT_CODE:-unknown}**"
             if [ "${DEPLOY_VALIDATION_STATUS:-failed}" = "passed" ]; then
-              echo "- Merge recommendation: **SAFE TO MERGE** based on Salesforce deployment validation."
+              echo "- Merge recommendation: **SAFE TO REVIEW**"
             else
-              echo "- Merge recommendation: **NOT SAFE TO MERGE** based on Salesforce deployment validation."
+              echo "- Merge recommendation: **NOT SAFE**"
             fi
             if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
-              echo "- Enforcement: **ativo**"
+              echo "- Enforcement: blocking"
             else
-              echo "- Enforcement: **informativo**"
+              echo "- Enforcement: advisory"
             fi
 
             if [ -f "$deploy_log" ]; then
@@ -406,7 +471,7 @@ jobs:
               echo
               echo '```text'
               perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g' "$deploy_log" \
-                | grep -E '^(Status:|Deploy ID:|Test Failures|Passing:|Failing:|Total:|Error \(|.*Average test coverage.*|.*at least [0-9]+%.*|.*FIELD_CUSTOM_VALIDATION_EXCEPTION.*|.*CANNOT_EXECUTE_FLOW_TRIGGER.*|.*System\.AssertException.*|.*Class\..*: line .*|.*• .*)' \
+                | grep -E '^(Status:|Deploy ID:|Test Failures|Passing:|Failing:|Total:|Error \(|.*Average test coverage.*|.*at least [0-9]+%.*|.*FIELD_CUSTOM_VALIDATION_EXCEPTION.*|.*CANNOT_EXECUTE_FLOW_TRIGGER.*|.*System\.AssertException.*|.*Class\..*: line .*)' \
                 | head -n 80 || true
               echo '```'
               echo
@@ -418,9 +483,11 @@ jobs:
 
           if [ ! -f "$summary_file" ]; then
             {
-              echo "## Resultado do versionamento de API"
+              echo "## API Version Upgrade Result"
               echo
-              echo "A comparação antes/depois não foi gerada. Rever os steps anteriores."
+              echo "**NOT SAFE**"
+              echo
+              echo "Analyzer comparison was not generated. Review the previous steps."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -430,66 +497,66 @@ jobs:
           set +a
 
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
-            decision="NÃO APLICAR"
-            reason="Surgiram novos findings High/Critical depois da alteração."
+            decision="NOT SAFE"
+            reason="New High/Critical findings appeared after the API version update."
           elif [ "${api_version_fixed:-0}" -gt 0 ]; then
-            decision="REVER PATCH"
-            reason="Findings relacionados com API version reduziram neste run."
+            decision="SAFE TO REVIEW"
+            reason="API version findings decreased in this run."
           elif [ "${fixed_findings:-0}" -gt 0 ]; then
-            decision="REVER PATCH"
-            reason="Findings do Analyzer reduziram neste run."
+            decision="SAFE TO REVIEW"
+            reason="Analyzer findings decreased in this run."
           else
-            decision="SEM AÇÃO"
-            reason="Não houve redução de findings neste run."
+            decision="NO CHANGE"
+            reason="No analyzer reduction was detected in this run."
           fi
 
-          echo "Resultado do versionamento de API"
-          echo "Decisão: ${decision}"
-          echo "Motivo: ${reason}"
+          echo "API version result"
+          echo "Decision: ${decision}"
+          echo "Reason: ${reason}"
           echo "API version findings: ${api_version_before:-0} -> ${api_version_after:-0}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
-          echo "Novos High/Critical: ${new_high_or_critical:-0}"
-          echo "::notice title=Resultado API version::${decision}. ${reason} API version: ${api_version_before:-0}->${api_version_after:-0}. Analyzer: ${total_before:-0}->${total_after:-0}. Novos High/Critical: ${new_high_or_critical:-0}."
+          echo "New High/Critical: ${new_high_or_critical:-0}"
+          echo "::notice title=API version result::${decision}. ${reason} API version: ${api_version_before:-0}->${api_version_after:-0}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
 
           {
-            echo "## Resultado do versionamento de API"
+            echo "## API Version Upgrade Result"
             echo
-            echo "### Decisão"
+            echo "### Decision"
             echo
             echo "**${decision}**"
             echo
             echo "${reason}"
             echo
-            echo "| Métrica | Antes | Depois |"
+            echo "| Metric | Before | After |"
             echo "| --- | ---: | ---: |"
             echo "| API version findings | ${api_version_before:-0} | ${api_version_after:-0} |"
             echo "| Analyzer findings | ${total_before:-0} | ${total_after:-0} |"
-            echo "| Novos findings | 0 | ${new_findings:-0} |"
-            echo "| Novos High/Critical | 0 | ${new_high_or_critical:-0} |"
+            echo "| New findings | 0 | ${new_findings:-0} |"
+            echo "| New High/Critical | 0 | ${new_high_or_critical:-0} |"
             echo
             echo "### Patch"
             echo
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
-              echo "- Branch de correção criada: \`${FIX_BRANCH_NAME}\`"
+              echo "- Fix branch: \`${FIX_BRANCH_NAME}\`"
+              if [ -n "${FIX_PR_URL:-}" ]; then
+                echo "- Pull request: ${FIX_PR_URL}"
+              fi
             elif [ "${{ inputs.enforce_deploy_validation }}" = "true" ] && [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
-              echo "- Branch de correção criada: não."
-              echo "- Motivo: deploy validation falhou e enforcement está ativo."
+              echo "- Fix branch: not created."
+              echo "- Reason: deploy validation failed and enforcement is blocking."
             else
-              echo "- Branch de correção criada: não."
-              echo "- Motivo: ${FIX_BRANCH_REASON:-não aplicável}."
+              echo "- Fix branch: not created."
+              echo "- Reason: ${FIX_BRANCH_REASON:-not applicable}."
             fi
             if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
               echo "- Deploy validation: ${DEPLOY_VALIDATION_STATUS:-failed}."
             else
-              echo "- Deploy validation: não executado."
+              echo "- Deploy validation: not executed."
             fi
             echo
             append_deploy_validation_summary
-            echo
-            echo "- Não faz merge automático nem altera diretamente a branch alvo."
-            echo "- O resultado compara apenas o estado antes/depois do run atual. Não usa API externa nem histórico entre runs."
           } >> "$GITHUB_STEP_SUMMARY"
-
+          exit 0
       - name: List generated reports
         if: ${{ always() }}
         shell: bash
