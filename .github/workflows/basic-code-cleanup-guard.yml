@@ -67,6 +67,26 @@ on:
         required: true
         default: "30"
         type: string
+      run_lwc_contract_validation:
+        description: "Deploy baseline and candidate to a dedicated org and compare LWC runtime contracts"
+        required: true
+        default: false
+        type: boolean
+      enforce_lwc_contract_validation:
+        description: "Block the fix branch when the optional LWC runtime contract differs"
+        required: true
+        default: true
+        type: boolean
+      lwc_contract_tolerance_px:
+        description: "Allowed width/height difference in pixels for LWC runtime contracts"
+        required: true
+        default: "1"
+        type: string
+      lwc_contract_wait_ms:
+        description: "Milliseconds to wait for Lightning components to render"
+        required: true
+        default: "8000"
+        type: string
 
 permissions:
   contents: write
@@ -76,13 +96,14 @@ env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
   SLDS_LINTER_VERSION: "1.2.1"
+  PLAYWRIGHT_VERSION: "1.60.0"
   REPORT_DIR: "docs/basic-code-cleanup-guard"
 
 jobs:
   basic-code-cleanup-guard:
     name: Test basic code cleanup
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout workflow tools
@@ -585,9 +606,209 @@ jobs:
           cat "$report_log"
           exit 0
 
+      - name: Validate LWC runtime contracts
+        id: lwc-contract
+        if: ${{ inputs.run_lwc_contract_validation }}
+        shell: bash
+        env:
+          SF_VISUAL_AUTH_URL: ${{ secrets.SF_VISUAL_AUTH_URL }}
+        run: |
+          set -uo pipefail
+
+          report_dir="project/${REPORT_DIR}"
+          report_md="${report_dir}/lwc-contract-validation.md"
+          report_json="${report_dir}/lwc-contract-validation.json"
+          changed_files="${report_dir}/changed-files.txt"
+          baseline_dir="${GITHUB_WORKSPACE}/lwc-contract-baseline"
+          auth_file="$(mktemp)"
+          baseline_ready=false
+          visual_org_ready=false
+
+          finish() {
+            set +e
+            if [ "$baseline_ready" = "true" ] && [ "$visual_org_ready" = "true" ]; then
+              sf project deploy start \
+                --source-dir "${baseline_dir}/${{ inputs.source_dir }}" \
+                --target-org visual-validation-org \
+                --test-level NoTestRun \
+                --wait "${{ inputs.deploy_wait_minutes }}" \
+                > "${report_dir}/lwc-contract-restore.log" 2>&1
+              (
+                cd "$baseline_dir"
+                sf project delete source \
+                  --metadata "LightningComponentBundle:autofixValidationHarness" \
+                  --metadata "CustomTab:Autofix_Validation_Harness" \
+                  --target-org visual-validation-org \
+                  --test-level NoTestRun \
+                  --wait "${{ inputs.deploy_wait_minutes }}" \
+                  --no-prompt
+              ) > "${report_dir}/lwc-contract-harness-cleanup.log" 2>&1 || true
+            fi
+            rm -f "$auth_file" "${report_dir}/lwc-contract-url.json"
+            rm -rf \
+              "project/${{ inputs.source_dir }}/main/default/lwc/autofixValidationHarness" \
+              "project/${{ inputs.source_dir }}/main/default/tabs/Autofix_Validation_Harness.tab-meta.xml" \
+              "$baseline_dir"
+          }
+          trap finish EXIT
+
+          write_failure() {
+            local reason="$1"
+            printf '{"status":"failed","reason":"%s"}\n' "$reason" > "$report_json"
+            {
+              echo "# LWC contract validation"
+              echo
+              echo "- Status: **failed**"
+              echo "- Reason: ${reason}"
+            } > "$report_md"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          }
+
+          if [ -z "${SF_VISUAL_AUTH_URL:-}" ]; then
+            write_failure "SF_VISUAL_AUTH_URL is not configured"
+            exit 0
+          fi
+
+          if ! grep -Eq "^${{ inputs.source_dir }}/main/default/lwc/[^/]+/" "$changed_files"; then
+            echo '{"status":"skipped_no_lwc","componentsChecked":0}' > "$report_json"
+            {
+              echo "# LWC contract validation"
+              echo
+              echo "- Status: **skipped_no_lwc**"
+              echo "- Components checked: **0**"
+            } > "$report_md"
+            echo "status=skipped_no_lwc" >> "$GITHUB_OUTPUT"
+            echo "reason=no changed LWC bundles" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git clone --quiet --no-hardlinks --no-recurse-submodules project "$baseline_dir"; then
+            write_failure "Baseline checkout failed"
+            exit 0
+          fi
+
+          if ! node tools/scripts/nodejs/generate-lwc-contract-harness.mjs \
+            --project-root "$baseline_dir" \
+            --source-dir "${{ inputs.source_dir }}" \
+            --changed-files "$changed_files" \
+            --manifest "${report_dir}/lwc-contract-manifest.json"; then
+            write_failure "Baseline LWC harness generation failed"
+            exit 0
+          fi
+          if ! node tools/scripts/nodejs/generate-lwc-contract-harness.mjs \
+            --project-root project \
+            --source-dir "${{ inputs.source_dir }}" \
+            --changed-files "$changed_files" \
+            --manifest "${report_dir}/lwc-contract-manifest.json"; then
+            write_failure "Candidate LWC harness generation failed"
+            exit 0
+          fi
+
+          component_count="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.components.length)" "${report_dir}/lwc-contract-manifest.json")"
+          if [ "$component_count" -eq 0 ]; then
+            echo '{"status":"skipped_no_lwc","componentsChecked":0}' > "$report_json"
+            echo "# LWC contract validation" > "$report_md"
+            echo "status=skipped_no_lwc" >> "$GITHUB_OUTPUT"
+            echo "reason=no deployable changed LWC bundles" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! npm install --prefix tools --no-save --no-package-lock "playwright@${PLAYWRIGHT_VERSION}" \
+            > "${report_dir}/lwc-contract-playwright-install.log" 2>&1; then
+            write_failure "Playwright installation failed"
+            exit 0
+          fi
+          if ! (cd tools && npx playwright install --with-deps chromium) \
+            >> "${report_dir}/lwc-contract-playwright-install.log" 2>&1; then
+            write_failure "Chromium installation failed"
+            exit 0
+          fi
+
+          printf '%s' "$SF_VISUAL_AUTH_URL" > "$auth_file"
+          if ! sf org login sfdx-url --sfdx-url-file "$auth_file" --alias visual-validation-org \
+            > "${report_dir}/lwc-contract-auth.log" 2>&1; then
+            write_failure "Salesforce visual validation org authentication failed"
+            exit 0
+          fi
+          visual_org_ready=true
+
+          if ! sf project deploy start \
+            --source-dir "${baseline_dir}/${{ inputs.source_dir }}" \
+            --target-org visual-validation-org \
+            --test-level NoTestRun \
+            --wait "${{ inputs.deploy_wait_minutes }}" \
+            > "${report_dir}/lwc-contract-baseline-deploy.log" 2>&1; then
+            write_failure "Baseline deployment failed"
+            exit 0
+          fi
+          baseline_ready=true
+
+          route="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.route)" "${report_dir}/lwc-contract-manifest.json")"
+          if ! sf org open --target-org visual-validation-org --path "$route" --url-only --json \
+            > "${report_dir}/lwc-contract-url.json" 2> "${report_dir}/lwc-contract-browser.log"; then
+            write_failure "Baseline harness URL generation failed"
+            exit 0
+          fi
+          if ! node tools/scripts/nodejs/capture-lwc-contract.mjs \
+            --url-json "${report_dir}/lwc-contract-url.json" \
+            --manifest "${report_dir}/lwc-contract-manifest.json" \
+            --output "${report_dir}/lwc-contract-baseline.json" \
+            --wait-ms "${{ inputs.lwc_contract_wait_ms }}" \
+            >> "${report_dir}/lwc-contract-browser.log" 2>&1; then
+            write_failure "Baseline LWC contract capture failed"
+            exit 0
+          fi
+
+          if ! sf project deploy start \
+            --source-dir "project/${{ inputs.source_dir }}" \
+            --target-org visual-validation-org \
+            --test-level NoTestRun \
+            --wait "${{ inputs.deploy_wait_minutes }}" \
+            > "${report_dir}/lwc-contract-candidate-deploy.log" 2>&1; then
+            write_failure "Candidate deployment failed"
+            exit 0
+          fi
+
+          if ! sf org open --target-org visual-validation-org --path "$route" --url-only --json \
+            > "${report_dir}/lwc-contract-url.json" 2>> "${report_dir}/lwc-contract-browser.log"; then
+            write_failure "Candidate harness URL generation failed"
+            exit 0
+          fi
+          if ! node tools/scripts/nodejs/capture-lwc-contract.mjs \
+            --url-json "${report_dir}/lwc-contract-url.json" \
+            --manifest "${report_dir}/lwc-contract-manifest.json" \
+            --output "${report_dir}/lwc-contract-candidate.json" \
+            --wait-ms "${{ inputs.lwc_contract_wait_ms }}" \
+            >> "${report_dir}/lwc-contract-browser.log" 2>&1; then
+            write_failure "Candidate LWC contract capture failed"
+            exit 0
+          fi
+
+          set +e
+          node tools/scripts/nodejs/compare-lwc-contracts.mjs \
+            --baseline "${report_dir}/lwc-contract-baseline.json" \
+            --candidate "${report_dir}/lwc-contract-candidate.json" \
+            --json "$report_json" \
+            --markdown "$report_md" \
+            --tolerance-px "${{ inputs.lwc_contract_tolerance_px }}"
+          compare_code=$?
+          set -e
+
+          if [ "$compare_code" -eq 0 ]; then
+            status="passed"
+            reason="runtime contracts match"
+          else
+            status="failed"
+            reason="runtime contract differences detected"
+          fi
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          exit 0
+
       - name: Push cleanup fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch && (!inputs.enforce_deploy_validation || !inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        if: ${{ inputs.create_fix_branch && (!inputs.enforce_deploy_validation || !inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') && (!inputs.enforce_lwc_contract_validation || !inputs.run_lwc_contract_validation || steps.lwc-contract.outputs.status == 'passed' || steps.lwc-contract.outputs.status == 'skipped_no_lwc') }}
         shell: bash
         working-directory: project
         env:
@@ -677,7 +898,7 @@ jobs:
 
       - name: Open cleanup fix pull request
         id: fix-pr
-        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') && (!inputs.run_lwc_contract_validation || steps.lwc-contract.outputs.status == 'passed' || steps.lwc-contract.outputs.status == 'skipped_no_lwc') }}
         uses: actions/github-script@v7
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
@@ -687,6 +908,8 @@ jobs:
           DRAFT_PULL_REQUEST: ${{ inputs.draft_pull_request }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
+          LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
+          LWC_CONTRACT_REASON: ${{ steps.lwc-contract.outputs.reason }}
         with:
           script: |
             const fs = require('fs');
@@ -764,6 +987,7 @@ jobs:
               `| JavaScript cleanup | var->let ${cleanupReport.varToLetFixed ?? 0}, unused event params ${cleanupReport.unusedEventParamsRemoved ?? 0}, let->const ${cleanupReport.letToConstFixed ?? 0}, http->https ${cleanupReport.insecureHttpFixed ?? 0}, structuredClone ${cleanupReport.jsonCloneFixed ?? 0}, crypto random ${cleanupReport.mathRandomFixed ?? 0} |`,
               `| Patch size | ${diffSummary.diff_files || '0'} files, ${diffSummary.diff_insertions || '0'} insertions, ${diffSummary.diff_deletions || '0'} deletions |`,
               `| Salesforce deploy validation | ${process.env.DEPLOY_VALIDATION_STATUS || 'not executed'} (${process.env.DEPLOY_VALIDATION_EXIT_CODE || 'unknown'}) |`,
+              `| LWC runtime contract | ${process.env.LWC_CONTRACT_STATUS || 'not executed'} |`,
               `| External PR checks | PENDING |`,
               '',
               'Rules: keep this PR as draft until external checks pass and the generated patch has been reviewed.',
@@ -795,6 +1019,8 @@ jobs:
           FIX_PR_URL: ${{ steps.fix-pr.outputs.url }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
+          LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
+          LWC_CONTRACT_REASON: ${{ steps.lwc-contract.outputs.reason }}
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
           guided_json="${REPORT_DIR}/analyzer-guided-fixes.json"
@@ -806,6 +1032,7 @@ jobs:
           summary_file="${REPORT_DIR}/comparison-summary.env"
           diff_summary_file="${REPORT_DIR}/diff-summary.env"
           deploy_log="${REPORT_DIR}/deploy-validation.log"
+          lwc_contract_json="${REPORT_DIR}/lwc-contract-validation.json"
 
           append_deploy_validation_summary() {
             echo "### Salesforce Deployment Validation"
@@ -971,6 +1198,9 @@ jobs:
           elif [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
             operator_decision="NOT SAFE"
             operator_reason="Salesforce deployment validation failed."
+          elif [ "${{ inputs.run_lwc_contract_validation }}" = "true" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "passed" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "skipped_no_lwc" ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="LWC runtime contract validation failed."
           elif [ "${diff_files}" -gt 0 ]; then
             operator_decision="SAFE TO REVIEW"
             operator_reason="Static checks improved and Salesforce deployment validation passed."
@@ -989,6 +1219,7 @@ jobs:
             echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
             echo "- SLDS auto-fix: **${slds_status}** (exit ${slds_exit_code})"
             echo "- Analyzer-guided safe fixes: **${guided_total}**"
+            echo "- LWC runtime contract: **${LWC_CONTRACT_STATUS:-not executed}**"
             echo "- JavaScript cleanup: **var->let ${var_to_let_fixed}**, **unused event params ${unused_event_params_removed}**, **let->const ${let_to_const_fixed}**, **http->https ${insecure_http_fixed}**, **structuredClone ${json_clone_fixed}**, **crypto random ${math_random_fixed}**"
             echo "- New High/Critical: **${new_high_or_critical:-0}**"
             echo "- Patch size: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
@@ -1112,6 +1343,11 @@ jobs:
             else
               echo "- Deploy validation: not executed."
             fi
+            if [ "${{ inputs.run_lwc_contract_validation }}" = "true" ]; then
+              echo "- LWC runtime contract: ${LWC_CONTRACT_STATUS:-failed}."
+            else
+              echo "- LWC runtime contract: not executed."
+            fi
             echo
             append_deploy_validation_summary
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1180,6 +1416,7 @@ jobs:
             project/docs/basic-code-cleanup-guard/comparison-summary.env
             project/docs/basic-code-cleanup-guard/deploy-validation-report.md
             project/docs/basic-code-cleanup-guard/deploy-validation.log
+            project/docs/basic-code-cleanup-guard/lwc-contract-*
           if-no-files-found: warn
 
       - name: Fail if enforced deploy validation failed
@@ -1187,4 +1424,11 @@ jobs:
         shell: bash
         run: |
           echo "Deploy validation failed and enforcement is active. Check deploy-validation.log in the uploaded artifact."
+          exit 1
+
+      - name: Fail if enforced LWC contract validation failed
+        if: ${{ inputs.enforce_lwc_contract_validation && inputs.run_lwc_contract_validation && steps.lwc-contract.outputs.status != 'passed' && steps.lwc-contract.outputs.status != 'skipped_no_lwc' }}
+        shell: bash
+        run: |
+          echo "LWC runtime contract validation failed and enforcement is active. Check the uploaded contract reports."
           exit 1
