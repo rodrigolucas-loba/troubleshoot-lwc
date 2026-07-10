@@ -631,6 +631,7 @@ jobs:
             const diffSummaryPath = 'project/docs/basic-code-cleanup-guard/diff-summary.env';
             const styleBeforePath = 'project/docs/basic-code-cleanup-guard/style-checks-before.json';
             const styleAfterPath = 'project/docs/basic-code-cleanup-guard/style-checks-after.json';
+            const cleanupReportPath = 'project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json';
 
             function readEnvFile(filePath) {
               if (!fs.existsSync(filePath)) return {};
@@ -654,6 +655,7 @@ jobs:
             const diffSummary = readEnvFile(diffSummaryPath);
             const styleBefore = readJsonFile(styleBeforePath);
             const styleAfter = readJsonFile(styleAfterPath);
+            const cleanupReport = readJsonFile(cleanupReportPath);
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -685,6 +687,7 @@ jobs:
               `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
               `| Prettier warnings | ${styleBefore.prettierWarnings ?? 0} -> ${styleAfter.prettierWarnings ?? 0} |`,
               `| ESLint problems | ${styleBefore.eslintProblems ?? 0} -> ${styleAfter.eslintProblems ?? 0} |`,
+              `| JavaScript cleanup | var->let ${cleanupReport.varToLetFixed ?? 0}, unused event params ${cleanupReport.unusedEventParamsRemoved ?? 0}, let->const ${cleanupReport.letToConstFixed ?? 0} |`,
               `| Patch size | ${diffSummary.diff_files || '0'} files, ${diffSummary.diff_insertions || '0'} insertions, ${diffSummary.diff_deletions || '0'} deletions |`,
               `| Salesforce deploy validation | ${process.env.DEPLOY_VALIDATION_STATUS || 'not executed'} (${process.env.DEPLOY_VALIDATION_EXIT_CODE || 'unknown'}) |`,
               `| External PR checks | PENDING |`,
@@ -770,10 +773,16 @@ jobs:
             changed_files="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.changedFiles || 0)" "$cleanup_json")"
             trailing_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.trailingWhitespaceLinesFixed || 0)" "$cleanup_json")"
             final_newlines="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.finalNewlinesAdded || 0)" "$cleanup_json")"
+            var_to_let_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.varToLetFixed || 0)" "$cleanup_json")"
+            unused_event_params_removed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.unusedEventParamsRemoved || 0)" "$cleanup_json")"
+            let_to_const_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.letToConstFixed || 0)" "$cleanup_json")"
           else
             changed_files=0
             trailing_fixed=0
             final_newlines=0
+            var_to_let_fixed=0
+            unused_event_params_removed=0
+            let_to_const_fixed=0
           fi
 
           if [ -f "$formatting_json" ]; then
@@ -863,6 +872,7 @@ jobs:
             echo "- Prettier warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
             echo "- ESLint problems: **${eslint_problems_before} -> ${eslint_problems_after}**"
             echo "- Analyzer findings: **${total_before:-0} -> ${total_after:-0}**"
+            echo "- JavaScript cleanup: **var->let ${var_to_let_fixed}**, **unused event params ${unused_event_params_removed}**, **let->const ${let_to_const_fixed}**"
             echo "- New High/Critical: **${new_high_or_critical:-0}**"
             echo "- Patch size: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
           } > "$classification_md"
@@ -887,10 +897,13 @@ jobs:
                 patchInsertions: Number(process.argv[14]),
                 patchDeletions: Number(process.argv[15]),
                 trailingWhitespaceLinesFixed: Number(process.argv[16]),
-                finalNewlinesAdded: Number(process.argv[17])
+                finalNewlinesAdded: Number(process.argv[17]),
+                varToLetFixed: Number(process.argv[18]),
+                unusedEventParamsRemoved: Number(process.argv[19]),
+                letToConstFixed: Number(process.argv[20])
               }
             };
-            fs.writeFileSync(process.argv[18], JSON.stringify(data, null, 2) + '\n');
+            fs.writeFileSync(process.argv[21], JSON.stringify(data, null, 2) + '\n');
           " \
             "${operator_decision}" \
             "${operator_reason}" \
@@ -909,6 +922,9 @@ jobs:
             "${diff_deletions}" \
             "${trailing_fixed}" \
             "${final_newlines}" \
+            "${var_to_let_fixed}" \
+            "${unused_event_params_removed}" \
+            "${let_to_const_fixed}" \
             "$classification_json"
 
           echo "Cleanup result"
@@ -917,8 +933,9 @@ jobs:
           echo "Prettier warnings: ${prettier_warnings_before} -> ${prettier_warnings_after}"
           echo "ESLint problems: ${eslint_problems_before} -> ${eslint_problems_after}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
+          echo "JavaScript cleanup: var->let ${var_to_let_fixed}, unused event params ${unused_event_params_removed}, let->const ${let_to_const_fixed}"
           echo "New High/Critical: ${new_high_or_critical:-0}"
-          echo "::notice title=Cleanup result::${operator_decision}. ${operator_reason} Patch: ${diff_files} files. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
+          echo "::notice title=Cleanup result::${operator_decision}. ${operator_reason} Patch: ${diff_files} files. JS: var->let ${var_to_let_fixed}, unused event ${unused_event_params_removed}, let->const ${let_to_const_fixed}. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
 
           {
             echo "## Basic Code Cleanup Result"
@@ -941,6 +958,9 @@ jobs:
             echo "- Files changed: **${diff_files}**"
             echo "- Trailing whitespace lines fixed: **${trailing_fixed}**"
             echo "- Final newlines added: **${final_newlines}**"
+            echo "- JavaScript var to let fixes: **${var_to_let_fixed}**"
+            echo "- Unused event parameters removed: **${unused_event_params_removed}**"
+            echo "- JavaScript let to const fixes: **${let_to_const_fixed}**"
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
               echo "- Fix branch: \`${FIX_BRANCH_NAME}\`"
               if [ -n "${FIX_PR_URL:-}" ]; then

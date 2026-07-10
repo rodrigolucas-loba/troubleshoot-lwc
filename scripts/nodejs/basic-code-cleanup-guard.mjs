@@ -65,6 +65,10 @@ node scripts/nodejs/basic-code-cleanup-guard.mjs \\
 Low-risk cleanup only:
   - removes trailing spaces and tabs
   - ensures one final newline when a text file is non-empty
+  - applies conservative JavaScript cleanup for analyzer findings:
+    - var to let
+    - unused event handler parameter removal
+    - simple let to const
 
 Options:
   --source-dir  Source directory to scan. Defaults to force-app.
@@ -148,16 +152,177 @@ function cleanupText(content) {
   };
 }
 
+function findMatchingBrace(content, openIndex) {
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = openIndex; index < content.length; index++) {
+    const char = content[index];
+    const next = content[index + 1];
+
+    if (lineComment) {
+      if (char === "\n") {
+        lineComment = false;
+      }
+      continue;
+    }
+
+    if (blockComment) {
+      if (char === "*" && next === "/") {
+        blockComment = false;
+        index++;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      lineComment = true;
+      index++;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      blockComment = true;
+      index++;
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      continue;
+    }
+
+    if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function replaceSimpleVarWithLet(content) {
+  let converted = 0;
+  const lines = content.split("\n");
+  const updatedLines = lines.map((line) => {
+    if (!/^[ \t]*var\s+/.test(line)) {
+      return line;
+    }
+
+    converted++;
+    return line.replace(/^([ \t]*)var(\s+)/, "$1let$2");
+  });
+
+  return { content: updatedLines.join("\n"), converted };
+}
+
+function removeUnusedEventParameters(content) {
+  let updated = content;
+  let removed = 0;
+  const methodPattern = /(^[ \t]*(?:async[ \t]+)?[A-Za-z_$][\w$]*\()event(\)[ \t]*\{)/gm;
+  const matches = [...updated.matchAll(methodPattern)].reverse();
+
+  for (const match of matches) {
+    const openBraceIndex = match.index + match[0].lastIndexOf("{");
+    const closeBraceIndex = findMatchingBrace(updated, openBraceIndex);
+    if (closeBraceIndex === -1) {
+      continue;
+    }
+
+    const body = updated.slice(openBraceIndex + 1, closeBraceIndex);
+    if (/\bevent\b/.test(body)) {
+      continue;
+    }
+
+    updated = `${updated.slice(0, match.index)}${match[1]}${match[2]}${updated.slice(match.index + match[0].length)}`;
+    removed++;
+  }
+
+  return { content: updated, removed };
+}
+
+function replaceSimpleLetWithConst(content) {
+  let updated = content;
+  let converted = 0;
+  const declarationPattern = /\blet\s+([A-Za-z_$][\w$]*)\s*=/g;
+  const matches = [...updated.matchAll(declarationPattern)].reverse();
+
+  for (const match of matches) {
+    const name = match[1];
+    const lineStart = updated.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = updated.indexOf("\n", match.index);
+    const declarationLine = updated.slice(lineStart, lineEnd === -1 ? updated.length : lineEnd);
+
+    if (/\bfor\s*\(/.test(declarationLine)) {
+      continue;
+    }
+
+    const functionStart = updated.lastIndexOf("{", match.index);
+    const functionEnd = functionStart === -1 ? -1 : findMatchingBrace(updated, functionStart);
+    if (functionStart === -1 || functionEnd === -1 || functionEnd <= match.index) {
+      continue;
+    }
+
+    const afterDeclaration = updated.slice(match.index + match[0].length, functionEnd);
+    const assignmentPattern = new RegExp(`(?:^|[^.$\\w])${name}\\s*(?:=|\\+=|-=|\\*=|/=|%=|\\+\\+|--)`);
+    if (assignmentPattern.test(afterDeclaration)) {
+      continue;
+    }
+
+    updated = `${updated.slice(0, match.index)}const ${name} =${updated.slice(match.index + match[0].length)}`;
+    converted++;
+  }
+
+  return { content: updated, converted };
+}
+
+function cleanupJavaScript(content) {
+  let updated = content;
+  const varToLet = replaceSimpleVarWithLet(updated);
+  updated = varToLet.content;
+
+  const unusedEvent = removeUnusedEventParameters(updated);
+  updated = unusedEvent.content;
+
+  const letToConst = replaceSimpleLetWithConst(updated);
+  updated = letToConst.content;
+
+  return {
+    content: updated,
+    varToLet: varToLet.converted,
+    unusedEventParamsRemoved: unusedEvent.removed,
+    letToConst: letToConst.converted,
+  };
+}
+
 function markdownTable(rows) {
   if (!rows.length) {
     return "_No cleanup changes needed._";
   }
 
   return [
-    "| File | Trailing whitespace lines | Final newline added |",
-    "| --- | ---: | --- |",
+    "| File | Trailing whitespace lines | Final newline added | var to let | unused event params | let to const |",
+    "| --- | ---: | --- | ---: | ---: | ---: |",
     ...rows.map((row) =>
-      `| \`${row.file}\` | ${row.trailingWhitespaceLines} | ${row.addedFinalNewline ? "yes" : "no"} |`,
+      `| \`${row.file}\` | ${row.trailingWhitespaceLines} | ${row.addedFinalNewline ? "yes" : "no"} | ${row.varToLet || 0} | ${row.unusedEventParamsRemoved || 0} | ${row.letToConst || 0} |`,
     ),
   ].join("\n");
 }
@@ -189,7 +354,15 @@ async function main() {
 
   for (const filePath of textFiles) {
     const before = await fs.readFile(filePath, "utf8");
-    const result = cleanupText(before);
+    const textResult = cleanupText(before);
+    const jsResult = path.extname(filePath).toLowerCase() === ".js" ? cleanupJavaScript(textResult.content) : null;
+    const result = {
+      ...textResult,
+      content: jsResult ? jsResult.content : textResult.content,
+      varToLet: jsResult?.varToLet || 0,
+      unusedEventParamsRemoved: jsResult?.unusedEventParamsRemoved || 0,
+      letToConst: jsResult?.letToConst || 0,
+    };
 
     if (result.content === before) {
       continue;
@@ -200,6 +373,9 @@ async function main() {
       file: relative,
       trailingWhitespaceLines: result.trailingWhitespaceLines,
       addedFinalNewline: result.addedFinalNewline,
+      varToLet: result.varToLet,
+      unusedEventParamsRemoved: result.unusedEventParamsRemoved,
+      letToConst: result.letToConst,
       status: args.dryRun ? "would update" : "updated",
     });
 
@@ -218,6 +394,9 @@ async function main() {
     changedFiles: changes.length,
     trailingWhitespaceLinesFixed: changes.reduce((total, change) => total + change.trailingWhitespaceLines, 0),
     finalNewlinesAdded: changes.filter((change) => change.addedFinalNewline).length,
+    varToLetFixed: changes.reduce((total, change) => total + change.varToLet, 0),
+    unusedEventParamsRemoved: changes.reduce((total, change) => total + change.unusedEventParamsRemoved, 0),
+    letToConstFixed: changes.reduce((total, change) => total + change.letToConst, 0),
     changes,
   };
 
@@ -231,6 +410,9 @@ async function main() {
 - Files changed: **${report.changedFiles}**
 - Trailing whitespace lines fixed: **${report.trailingWhitespaceLinesFixed}**
 - Final newlines added: **${report.finalNewlinesAdded}**
+- JavaScript var to let fixes: **${report.varToLetFixed}**
+- Unused event parameters removed: **${report.unusedEventParamsRemoved}**
+- JavaScript let to const fixes: **${report.letToConstFixed}**
 
 ## Changes
 
@@ -243,6 +425,9 @@ ${markdownTable(changes)}
   console.log(`Basic cleanup completed. Changed files: ${changes.length}`);
   console.log(`Trailing whitespace lines fixed: ${report.trailingWhitespaceLinesFixed}`);
   console.log(`Final newlines added: ${report.finalNewlinesAdded}`);
+  console.log(`JavaScript var to let fixes: ${report.varToLetFixed}`);
+  console.log(`Unused event parameters removed: ${report.unusedEventParamsRemoved}`);
+  console.log(`JavaScript let to const fixes: ${report.letToConstFixed}`);
   console.log(`Markdown report: ${args.report}`);
   console.log(`JSON report: ${args.json}`);
 }
