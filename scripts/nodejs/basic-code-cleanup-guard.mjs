@@ -69,6 +69,9 @@ Low-risk cleanup only:
     - var to let
     - unused event handler parameter removal
     - simple let to const
+    - insecure http string literals to https
+    - simple JSON deep clone to structuredClone
+    - Math.random to Web Crypto random value
 
 Options:
   --source-dir  Source directory to scan. Defaults to force-app.
@@ -294,6 +297,32 @@ function replaceSimpleLetWithConst(content) {
   return { content: updated, converted };
 }
 
+function replaceInsecureHttp(content) {
+  const converted = (content.match(/http:\/\//g) || []).length;
+  return {
+    content: content.replace(/http:\/\//g, "https://"),
+    converted,
+  };
+}
+
+function replaceSimpleJsonClone(content) {
+  let converted = 0;
+  const updated = content.replace(/JSON\.parse\(\s*JSON\.stringify\(([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\)\s*\)/g, (_match, value) => {
+    converted++;
+    return `structuredClone(${value})`;
+  });
+
+  return { content: updated, converted };
+}
+
+function replaceMathRandom(content) {
+  const converted = (content.match(/Math\.random\(\)/g) || []).length;
+  return {
+    content: content.replace(/Math\.random\(\)/g, "(crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296)"),
+    converted,
+  };
+}
+
 function cleanupJavaScript(content) {
   let updated = content;
   const varToLet = replaceSimpleVarWithLet(updated);
@@ -305,11 +334,23 @@ function cleanupJavaScript(content) {
   const letToConst = replaceSimpleLetWithConst(updated);
   updated = letToConst.content;
 
+  const insecureHttp = replaceInsecureHttp(updated);
+  updated = insecureHttp.content;
+
+  const jsonClone = replaceSimpleJsonClone(updated);
+  updated = jsonClone.content;
+
+  const mathRandom = replaceMathRandom(updated);
+  updated = mathRandom.content;
+
   return {
     content: updated,
     varToLet: varToLet.converted,
     unusedEventParamsRemoved: unusedEvent.removed,
     letToConst: letToConst.converted,
+    insecureHttpFixed: insecureHttp.converted,
+    jsonCloneFixed: jsonClone.converted,
+    mathRandomFixed: mathRandom.converted,
   };
 }
 
@@ -319,10 +360,10 @@ function markdownTable(rows) {
   }
 
   return [
-    "| File | Trailing whitespace lines | Final newline added | var to let | unused event params | let to const |",
-    "| --- | ---: | --- | ---: | ---: | ---: |",
+    "| File | Trailing whitespace lines | Final newline added | var to let | unused event params | let to const | http to https | structuredClone | crypto random |",
+    "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...rows.map((row) =>
-      `| \`${row.file}\` | ${row.trailingWhitespaceLines} | ${row.addedFinalNewline ? "yes" : "no"} | ${row.varToLet || 0} | ${row.unusedEventParamsRemoved || 0} | ${row.letToConst || 0} |`,
+      `| \`${row.file}\` | ${row.trailingWhitespaceLines} | ${row.addedFinalNewline ? "yes" : "no"} | ${row.varToLet || 0} | ${row.unusedEventParamsRemoved || 0} | ${row.letToConst || 0} | ${row.insecureHttpFixed || 0} | ${row.jsonCloneFixed || 0} | ${row.mathRandomFixed || 0} |`,
     ),
   ].join("\n");
 }
@@ -362,6 +403,9 @@ async function main() {
       varToLet: jsResult?.varToLet || 0,
       unusedEventParamsRemoved: jsResult?.unusedEventParamsRemoved || 0,
       letToConst: jsResult?.letToConst || 0,
+      insecureHttpFixed: jsResult?.insecureHttpFixed || 0,
+      jsonCloneFixed: jsResult?.jsonCloneFixed || 0,
+      mathRandomFixed: jsResult?.mathRandomFixed || 0,
     };
 
     if (result.content === before) {
@@ -376,6 +420,9 @@ async function main() {
       varToLet: result.varToLet,
       unusedEventParamsRemoved: result.unusedEventParamsRemoved,
       letToConst: result.letToConst,
+      insecureHttpFixed: result.insecureHttpFixed,
+      jsonCloneFixed: result.jsonCloneFixed,
+      mathRandomFixed: result.mathRandomFixed,
       status: args.dryRun ? "would update" : "updated",
     });
 
@@ -397,6 +444,9 @@ async function main() {
     varToLetFixed: changes.reduce((total, change) => total + change.varToLet, 0),
     unusedEventParamsRemoved: changes.reduce((total, change) => total + change.unusedEventParamsRemoved, 0),
     letToConstFixed: changes.reduce((total, change) => total + change.letToConst, 0),
+    insecureHttpFixed: changes.reduce((total, change) => total + change.insecureHttpFixed, 0),
+    jsonCloneFixed: changes.reduce((total, change) => total + change.jsonCloneFixed, 0),
+    mathRandomFixed: changes.reduce((total, change) => total + change.mathRandomFixed, 0),
     changes,
   };
 
@@ -413,6 +463,9 @@ async function main() {
 - JavaScript var to let fixes: **${report.varToLetFixed}**
 - Unused event parameters removed: **${report.unusedEventParamsRemoved}**
 - JavaScript let to const fixes: **${report.letToConstFixed}**
+- JavaScript http to https fixes: **${report.insecureHttpFixed}**
+- JavaScript structuredClone fixes: **${report.jsonCloneFixed}**
+- JavaScript crypto random fixes: **${report.mathRandomFixed}**
 
 ## Changes
 
@@ -428,6 +481,9 @@ ${markdownTable(changes)}
   console.log(`JavaScript var to let fixes: ${report.varToLetFixed}`);
   console.log(`Unused event parameters removed: ${report.unusedEventParamsRemoved}`);
   console.log(`JavaScript let to const fixes: ${report.letToConstFixed}`);
+  console.log(`JavaScript http to https fixes: ${report.insecureHttpFixed}`);
+  console.log(`JavaScript structuredClone fixes: ${report.jsonCloneFixed}`);
+  console.log(`JavaScript crypto random fixes: ${report.mathRandomFixed}`);
   console.log(`Markdown report: ${args.report}`);
   console.log(`JSON report: ${args.json}`);
 }
