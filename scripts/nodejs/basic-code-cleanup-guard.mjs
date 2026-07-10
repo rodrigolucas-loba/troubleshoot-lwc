@@ -222,6 +222,50 @@ function findMatchingBrace(content, openIndex) {
   return -1;
 }
 
+function findEnclosingBrace(content, targetIndex) {
+  const stack = [];
+  let quote = "";
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < targetIndex; index++) {
+    const char = content[index];
+    const next = content[index + 1];
+    if (lineComment) {
+      if (char === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (char === "*" && next === "/") {
+        blockComment = false;
+        index++;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      lineComment = true;
+      index++;
+    } else if (char === "/" && next === "*") {
+      blockComment = true;
+      index++;
+    } else if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    } else if (char === "{") {
+      stack.push(index);
+    } else if (char === "}") {
+      stack.pop();
+    }
+  }
+  return stack.at(-1) ?? -1;
+}
+
 function replaceSimpleVarWithLet(content) {
   let converted = 0;
   const lines = content.split("\n");
@@ -278,7 +322,11 @@ function replaceSimpleLetWithConst(content) {
       continue;
     }
 
-    const afterDeclaration = updated.slice(match.index + match[0].length);
+    const blockStart = findEnclosingBrace(updated, match.index);
+    const blockEnd = blockStart === -1 ? -1 : findMatchingBrace(updated, blockStart);
+    if (blockEnd <= match.index) continue;
+
+    const afterDeclaration = updated.slice(match.index + match[0].length, blockEnd);
     const assignmentPattern = new RegExp(`(?:^|[^.$\\w])${name}\\s*(?:=|\\+=|-=|\\*=|/=|%=|\\+\\+|--)`);
     if (assignmentPattern.test(afterDeclaration)) {
       continue;

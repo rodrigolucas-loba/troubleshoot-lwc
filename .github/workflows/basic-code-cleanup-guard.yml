@@ -225,6 +225,16 @@ jobs:
           echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Apply analyzer-guided safe fixes
+        shell: bash
+        working-directory: project
+        run: |
+          node ../tools/scripts/nodejs/apply-analyzer-guided-fixes.mjs \
+            --root . \
+            --report "${REPORT_DIR}/analyzer-before.csv" \
+            --json "${REPORT_DIR}/analyzer-guided-fixes.json" \
+            --markdown "${REPORT_DIR}/analyzer-guided-fixes.md"
+
       - name: Apply basic cleanup in runner
         shell: bash
         working-directory: project
@@ -690,6 +700,7 @@ jobs:
             const styleAfterPath = 'project/docs/basic-code-cleanup-guard/style-checks-after.json';
             const cleanupReportPath = 'project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json';
             const sldsReportPath = 'project/docs/basic-code-cleanup-guard/slds-autofix-report.json';
+            const guidedFixesPath = 'project/docs/basic-code-cleanup-guard/analyzer-guided-fixes.json';
 
             function readEnvFile(filePath) {
               if (!fs.existsSync(filePath)) return {};
@@ -715,6 +726,7 @@ jobs:
             const styleAfter = readJsonFile(styleAfterPath);
             const cleanupReport = readJsonFile(cleanupReportPath);
             const sldsReport = readJsonFile(sldsReportPath);
+            const guidedFixes = readJsonFile(guidedFixesPath);
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -746,6 +758,7 @@ jobs:
               `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
               `| SLDS hardcoded-value findings fixed | ${summary.slds_fixed_findings || '0'} |`,
               `| SLDS auto-fix | ${sldsReport.status || 'not executed'} |`,
+              `| Analyzer-guided safe fixes | ${guidedFixes.totalFixes || '0'} |`,
               `| Prettier warnings | ${styleBefore.prettierWarnings ?? 0} -> ${styleAfter.prettierWarnings ?? 0} |`,
               `| ESLint problems | ${styleBefore.eslintProblems ?? 0} -> ${styleAfter.eslintProblems ?? 0} |`,
               `| JavaScript cleanup | var->let ${cleanupReport.varToLetFixed ?? 0}, unused event params ${cleanupReport.unusedEventParamsRemoved ?? 0}, let->const ${cleanupReport.letToConstFixed ?? 0}, http->https ${cleanupReport.insecureHttpFixed ?? 0}, structuredClone ${cleanupReport.jsonCloneFixed ?? 0}, crypto random ${cleanupReport.mathRandomFixed ?? 0} |`,
@@ -784,6 +797,7 @@ jobs:
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
+          guided_json="${REPORT_DIR}/analyzer-guided-fixes.json"
           slds_json="${REPORT_DIR}/slds-autofix-report.json"
           formatting_json="${REPORT_DIR}/formatting-report.json"
           eslint_fix_json="${REPORT_DIR}/eslint-fix-report.json"
@@ -851,6 +865,18 @@ jobs:
             insecure_http_fixed=0
             json_clone_fixed=0
             math_random_fixed=0
+          fi
+
+          if [ -f "$guided_json" ]; then
+            guided_total="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.totalFixes || 0)" "$guided_json")"
+            guided_slds="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.sldsHooks || 0)" "$guided_json")"
+            guided_annotations="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.apexAnnotations || 0)" "$guided_json")"
+            guided_braces="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.apexBraces || 0)" "$guided_json")"
+          else
+            guided_total=0
+            guided_slds=0
+            guided_annotations=0
+            guided_braces=0
           fi
 
           if [ -f "$slds_json" ]; then
@@ -962,6 +988,7 @@ jobs:
             echo "- Analyzer findings: **${total_before:-0} -> ${total_after:-0}**"
             echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
             echo "- SLDS auto-fix: **${slds_status}** (exit ${slds_exit_code})"
+            echo "- Analyzer-guided safe fixes: **${guided_total}**"
             echo "- JavaScript cleanup: **var->let ${var_to_let_fixed}**, **unused event params ${unused_event_params_removed}**, **let->const ${let_to_const_fixed}**, **http->https ${insecure_http_fixed}**, **structuredClone ${json_clone_fixed}**, **crypto random ${math_random_fixed}**"
             echo "- New High/Critical: **${new_high_or_critical:-0}**"
             echo "- Patch size: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
@@ -994,10 +1021,11 @@ jobs:
                 insecureHttpFixed: Number(process.argv[21]),
                 jsonCloneFixed: Number(process.argv[22]),
                 mathRandomFixed: Number(process.argv[23]),
-                sldsHardcodedValueFindingsFixed: Number(process.argv[24] || 0)
+                sldsHardcodedValueFindingsFixed: Number(process.argv[24] || 0),
+                analyzerGuidedFixes: Number(process.argv[25] || 0)
               }
             };
-            fs.writeFileSync(process.argv[25], JSON.stringify(data, null, 2) + '\n');
+            fs.writeFileSync(process.argv[26], JSON.stringify(data, null, 2) + '\n');
           " \
             "${operator_decision}" \
             "${operator_reason}" \
@@ -1023,6 +1051,7 @@ jobs:
             "${json_clone_fixed}" \
             "${math_random_fixed}" \
             "${slds_fixed_findings:-0}" \
+            "${guided_total}" \
             "$classification_json"
 
           echo "Cleanup result"
@@ -1032,6 +1061,7 @@ jobs:
           echo "ESLint problems: ${eslint_problems_before} -> ${eslint_problems_after}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "SLDS hardcoded-value findings fixed: ${slds_fixed_findings:-0}"
+          echo "Analyzer-guided safe fixes: ${guided_total}"
           echo "JavaScript cleanup: var->let ${var_to_let_fixed}, unused event params ${unused_event_params_removed}, let->const ${let_to_const_fixed}, http->https ${insecure_http_fixed}, structuredClone ${json_clone_fixed}, crypto random ${math_random_fixed}"
           echo "New High/Critical: ${new_high_or_critical:-0}"
           echo "::notice title=Cleanup result::${operator_decision}. ${operator_reason} Patch: ${diff_files} files. JS: var->let ${var_to_let_fixed}, unused event ${unused_event_params_removed}, let->const ${let_to_const_fixed}, http->https ${insecure_http_fixed}, structuredClone ${json_clone_fixed}, crypto random ${math_random_fixed}. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
@@ -1064,6 +1094,7 @@ jobs:
             echo "- JavaScript structuredClone fixes: **${json_clone_fixed}**"
             echo "- JavaScript crypto random fixes: **${math_random_fixed}**"
             echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
+            echo "- Analyzer-guided safe fixes: **${guided_total}** (SLDS ${guided_slds}, Apex annotations ${guided_annotations}, Apex braces ${guided_braces})"
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
               echo "- Fix branch: \`${FIX_BRANCH_NAME}\`"
               if [ -n "${FIX_PR_URL:-}" ]; then
@@ -1117,6 +1148,8 @@ jobs:
           path: |
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json
+            project/docs/basic-code-cleanup-guard/analyzer-guided-fixes.md
+            project/docs/basic-code-cleanup-guard/analyzer-guided-fixes.json
             project/docs/basic-code-cleanup-guard/slds-autofix-report.md
             project/docs/basic-code-cleanup-guard/slds-autofix-report.json
             project/docs/basic-code-cleanup-guard/slds-autofix.log
