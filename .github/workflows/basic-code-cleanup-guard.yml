@@ -77,6 +77,11 @@ on:
         required: true
         default: true
         type: boolean
+      allow_primary_auth_for_lwc_contract:
+        description: "POC only: allow SF_AUTH_URL when SF_VISUAL_AUTH_URL is unavailable"
+        required: true
+        default: false
+        type: boolean
       lwc_contract_tolerance_px:
         description: "Allowed width/height difference in pixels for LWC runtime contracts"
         required: true
@@ -612,6 +617,7 @@ jobs:
         shell: bash
         env:
           SF_VISUAL_AUTH_URL: ${{ secrets.SF_VISUAL_AUTH_URL }}
+          SF_PRIMARY_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
         run: |
           set -uo pipefail
 
@@ -665,8 +671,12 @@ jobs:
             echo "reason=${reason}" >> "$GITHUB_OUTPUT"
           }
 
-          if [ -z "${SF_VISUAL_AUTH_URL:-}" ]; then
-            write_failure "SF_VISUAL_AUTH_URL is not configured"
+          selected_auth_url="${SF_VISUAL_AUTH_URL:-}"
+          if [ -z "$selected_auth_url" ] && [ "${{ inputs.allow_primary_auth_for_lwc_contract }}" = "true" ]; then
+            selected_auth_url="${SF_PRIMARY_AUTH_URL:-}"
+          fi
+          if [ -z "$selected_auth_url" ]; then
+            write_failure "SF_VISUAL_AUTH_URL is not configured and the primary auth fallback is disabled"
             exit 0
           fi
 
@@ -725,7 +735,7 @@ jobs:
             exit 0
           fi
 
-          printf '%s' "$SF_VISUAL_AUTH_URL" > "$auth_file"
+          printf '%s' "$selected_auth_url" > "$auth_file"
           if ! sf org login sfdx-url --sfdx-url-file "$auth_file" --alias visual-validation-org \
             > "${report_dir}/lwc-contract-auth.log" 2>&1; then
             write_failure "Salesforce visual validation org authentication failed"
