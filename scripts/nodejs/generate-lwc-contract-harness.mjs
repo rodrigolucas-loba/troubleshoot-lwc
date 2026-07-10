@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 const HARNESS_BUNDLE = "autofixValidationHarness";
-const TAB_NAME = "Autofix_Validation_Harness";
+const HOST_BUNDLE = "autofixValidationHarnessHost";
 
 function parseArgs(argv) {
   const args = {};
@@ -62,9 +62,9 @@ async function main() {
   }
 
   const bundleDir = path.join(root, sourceDir, "main", "default", "lwc", HARNESS_BUNDLE);
-  const tabsDir = path.join(root, sourceDir, "main", "default", "tabs");
+  const hostDir = path.join(root, sourceDir, "main", "default", "aura", HOST_BUNDLE);
   await fs.mkdir(bundleDir, { recursive: true });
-  await fs.mkdir(tabsDir, { recursive: true });
+  await fs.mkdir(hostDir, { recursive: true });
 
   const sections = components.length
     ? components
@@ -98,8 +98,13 @@ async function main() {
     "utf8",
   );
   await fs.writeFile(
-    path.join(tabsDir, `${TAB_NAME}.tab-meta.xml`),
-    `<?xml version="1.0" encoding="UTF-8"?>\n<CustomTab xmlns="http://soap.sforce.com/2006/04/metadata">\n  <label>Autofix Validation Harness</label>\n  <lwcComponent>${HARNESS_BUNDLE}</lwcComponent>\n  <motif>Custom1: Heart</motif>\n</CustomTab>\n`,
+    path.join(hostDir, `${HOST_BUNDLE}.cmp`),
+    `<aura:component implements="force:appHostable,flexipage:availableForAllPageTypes" access="global">\n  <c:${HARNESS_BUNDLE} />\n</aura:component>\n`,
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(hostDir, `${HOST_BUNDLE}.cmp-meta.xml`),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<AuraDefinitionBundle xmlns="http://soap.sforce.com/2006/04/metadata">\n  <apiVersion>${apiVersion}</apiVersion>\n  <description>Temporary host for the autofix LWC contract harness.</description>\n</AuraDefinitionBundle>\n`,
     "utf8",
   );
 
@@ -107,8 +112,8 @@ async function main() {
     apiVersion,
     components,
     harnessBundle: HARNESS_BUNDLE,
-    tabName: TAB_NAME,
-    route: `/lightning/n/${TAB_NAME}`,
+    hostBundle: HOST_BUNDLE,
+    route: `/lightning/cmp/c__${HOST_BUNDLE}`,
   };
   const manifestPath = path.resolve(args.manifest);
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });

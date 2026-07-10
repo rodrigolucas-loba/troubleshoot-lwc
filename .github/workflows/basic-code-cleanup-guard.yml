@@ -645,7 +645,7 @@ jobs:
                 cd "$baseline_dir"
                 sf project delete source \
                   --metadata "LightningComponentBundle:autofixValidationHarness" \
-                  --metadata "CustomTab:Autofix_Validation_Harness" \
+                  --metadata "AuraDefinitionBundle:autofixValidationHarnessHost" \
                   --target-org visual-validation-org \
                   --test-level NoTestRun \
                   --wait "${{ inputs.deploy_wait_minutes }}" \
@@ -655,7 +655,7 @@ jobs:
             rm -f "$auth_file" "${report_dir}/lwc-contract-url.json"
             rm -rf \
               "project/${{ inputs.source_dir }}/main/default/lwc/autofixValidationHarness" \
-              "project/${{ inputs.source_dir }}/main/default/tabs/Autofix_Validation_Harness.tab-meta.xml" \
+              "project/${{ inputs.source_dir }}/main/default/aura/autofixValidationHarnessHost" \
               "$baseline_dir"
           }
           trap finish EXIT
