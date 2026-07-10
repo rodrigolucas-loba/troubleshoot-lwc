@@ -38,6 +38,20 @@ async function main() {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
     await page.waitForTimeout(args.waitMs);
 
+    const harnessTag = `c-${manifest.harnessBundle.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
+    let harnessLoaded = false;
+    for (let attempt = 0; attempt < 2 && !harnessLoaded; attempt++) {
+      try {
+        await page.waitForSelector(harnessTag, { state: "attached", timeout: Math.max(30000, args.waitMs) });
+        harnessLoaded = true;
+      } catch {
+        if (attempt === 0) {
+          await page.reload({ waitUntil: "domcontentloaded", timeout: 90000 });
+          await page.waitForTimeout(args.waitMs);
+        }
+      }
+    }
+
     const contract = await page.evaluate(({ harnessBundle, expectedComponents }) => {
       const styleProperties = [
         "display",
@@ -111,6 +125,14 @@ async function main() {
     const result = {
       capturedAt: new Date().toISOString(),
       route: manifest.route,
+      finalUrl: page.url().replace(/(sid|token|startURL)=[^&]+/gi, "$1=REDACTED"),
+      title: await page.title(),
+      bodyText: (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500),
+      customElementTags: await page
+        .locator("body")
+        .evaluate((body) => [...new Set([...body.querySelectorAll("*")].map((element) => element.tagName.toLowerCase()).filter((tag) => tag.includes("-")))].slice(0, 100))
+        .catch(() => []),
+      harnessLoaded,
       expectedComponents: manifest.components.map((component) => component.bundle),
       consoleErrors,
       pageErrors,
