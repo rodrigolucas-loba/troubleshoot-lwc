@@ -29,9 +29,14 @@ on:
         default: true
         type: boolean
       create_pull_request:
-        description: "Open a pull request when a fix branch is pushed. Keep false for broad cleanup until the patch is reviewed."
+        description: "Open a pull request when a fix branch is pushed"
         required: true
-        default: false
+        default: true
+        type: boolean
+      draft_pull_request:
+        description: "Create the automated pull request as draft so external quality gates can be reviewed first"
+        required: true
+        default: true
         type: boolean
       fix_branch_prefix:
         description: "Prefix for the generated fix branch"
@@ -605,19 +610,50 @@ jobs:
 
       - name: Open cleanup fix pull request
         id: fix-pr
-        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
+        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
         uses: actions/github-script@v7
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           TARGET_REF: ${{ inputs.target_ref }}
           CLEANUP_MODE: ${{ inputs.cleanup_mode }}
           SOURCE_DIR: ${{ inputs.source_dir }}
+          DRAFT_PULL_REQUEST: ${{ inputs.draft_pull_request }}
+          DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
+          DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         with:
           script: |
+            const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const head = process.env.FIX_BRANCH_NAME;
             const base = process.env.TARGET_REF;
+            const summaryPath = 'project/docs/basic-code-cleanup-guard/comparison-summary.env';
+            const diffSummaryPath = 'project/docs/basic-code-cleanup-guard/diff-summary.env';
+            const styleBeforePath = 'project/docs/basic-code-cleanup-guard/style-checks-before.json';
+            const styleAfterPath = 'project/docs/basic-code-cleanup-guard/style-checks-after.json';
+
+            function readEnvFile(filePath) {
+              if (!fs.existsSync(filePath)) return {};
+              return Object.fromEntries(
+                fs.readFileSync(filePath, 'utf8')
+                  .split(/\r?\n/)
+                  .filter(Boolean)
+                  .map((line) => {
+                    const index = line.indexOf('=');
+                    return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
+                  })
+              );
+            }
+
+            function readJsonFile(filePath) {
+              if (!fs.existsSync(filePath)) return {};
+              return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            }
+
+            const summary = readEnvFile(summaryPath);
+            const diffSummary = readEnvFile(diffSummaryPath);
+            const styleBefore = readJsonFile(styleBeforePath);
+            const styleAfter = readJsonFile(styleAfterPath);
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -640,6 +676,21 @@ jobs:
               `- Source directory: ${process.env.SOURCE_DIR}`,
               `- Workflow run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
               '',
+              '## Trust Ruleset',
+              '',
+              '| Rule | Status |',
+              '| --- | --- |',
+              `| Fix branch created | PASS |`,
+              `| Analyzer new High/Critical findings | ${summary.new_high_or_critical || '0'} |`,
+              `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
+              `| Prettier warnings | ${styleBefore.prettierWarnings ?? 0} -> ${styleAfter.prettierWarnings ?? 0} |`,
+              `| ESLint problems | ${styleBefore.eslintProblems ?? 0} -> ${styleAfter.eslintProblems ?? 0} |`,
+              `| Patch size | ${diffSummary.diff_files || '0'} files, ${diffSummary.diff_insertions || '0'} insertions, ${diffSummary.diff_deletions || '0'} deletions |`,
+              `| Salesforce deploy validation | ${process.env.DEPLOY_VALIDATION_STATUS || 'not executed'} (${process.env.DEPLOY_VALIDATION_EXIT_CODE || 'unknown'}) |`,
+              `| External PR checks | PENDING |`,
+              '',
+              'Rules: keep this PR as draft until external checks pass and the generated patch has been reviewed.',
+              '',
               'Review the patch and workflow artifacts before merging.'
             ].join('\n');
 
@@ -649,7 +700,8 @@ jobs:
               title: `Apply basic code cleanup (${process.env.CLEANUP_MODE})`,
               head,
               base,
-              body
+              body,
+              draft: process.env.DRAFT_PULL_REQUEST === 'true'
             });
 
             core.setOutput('url', pull.data.html_url);
