@@ -19,7 +19,7 @@ function parseArgs(argv) {
 }
 
 function componentTag(bundleName) {
-  return `c-${bundleName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}`;
+  return `c-${bundleName.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
 }
 
 async function exists(filePath) {

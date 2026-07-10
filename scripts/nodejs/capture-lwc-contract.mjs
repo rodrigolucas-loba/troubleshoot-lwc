@@ -93,7 +93,7 @@ async function main() {
         };
       }
 
-      const harnessTag = `c-${harnessBundle.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}`;
+      const harnessTag = `c-${harnessBundle.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
       const harness = document.querySelector(harnessTag);
       const root = harness?.shadowRoot || harness;
       const components = {};
