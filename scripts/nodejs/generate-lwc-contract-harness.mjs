@@ -99,7 +99,7 @@ async function main() {
   );
   await fs.writeFile(
     path.join(hostDir, `${HOST_BUNDLE}.cmp`),
-    `<aura:component implements="force:appHostable,flexipage:availableForAllPageTypes" access="global">\n  <c:${HARNESS_BUNDLE} />\n</aura:component>\n`,
+    `<aura:component implements="force:appHostable,flexipage:availableForAllPageTypes,lightning:isUrlAddressable" access="global">\n  <c:${HARNESS_BUNDLE} />\n</aura:component>\n`,
     "utf8",
   );
   await fs.writeFile(
