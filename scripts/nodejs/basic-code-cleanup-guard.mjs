@@ -278,13 +278,7 @@ function replaceSimpleLetWithConst(content) {
       continue;
     }
 
-    const functionStart = updated.lastIndexOf("{", match.index);
-    const functionEnd = functionStart === -1 ? -1 : findMatchingBrace(updated, functionStart);
-    if (functionStart === -1 || functionEnd === -1 || functionEnd <= match.index) {
-      continue;
-    }
-
-    const afterDeclaration = updated.slice(match.index + match[0].length, functionEnd);
+    const afterDeclaration = updated.slice(match.index + match[0].length);
     const assignmentPattern = new RegExp(`(?:^|[^.$\\w])${name}\\s*(?:=|\\+=|-=|\\*=|/=|%=|\\+\\+|--)`);
     if (assignmentPattern.test(afterDeclaration)) {
       continue;

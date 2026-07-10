@@ -15,7 +15,7 @@ on:
         default: "main"
         type: string
       cleanup_mode:
-        description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint --fix"
+        description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint and SLDS autofix"
         required: true
         default: "safe"
         type: choice
@@ -51,7 +51,7 @@ on:
       enforce_deploy_validation:
         description: "Fail the workflow and block the fix branch when Salesforce deploy validation fails"
         required: true
-        default: false
+        default: true
         type: boolean
       test_level:
         description: "Salesforce deploy validation test level"
@@ -75,6 +75,7 @@ permissions:
 env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
+  SLDS_LINTER_VERSION: "1.2.1"
   REPORT_DIR: "docs/basic-code-cleanup-guard"
 
 jobs:
@@ -232,6 +233,48 @@ jobs:
             --source-dir "${{ inputs.source_dir }}" \
             --report "${REPORT_DIR}/basic-code-cleanup-report.md" \
             --json "${REPORT_DIR}/basic-code-cleanup-report.json"
+
+      - name: Run optional SLDS auto-fix
+        shell: bash
+        working-directory: project
+        run: |
+          report_md="${REPORT_DIR}/slds-autofix-report.md"
+          report_json="${REPORT_DIR}/slds-autofix-report.json"
+          report_log="${REPORT_DIR}/slds-autofix.log"
+
+          if [ "${{ inputs.cleanup_mode }}" != "format_lintfix" ]; then
+            {
+              echo "# SLDS Auto-fix"
+              echo
+              echo "- Status: skipped"
+              echo "- Reason: cleanup_mode is not format_lintfix"
+            } > "$report_md"
+            echo '{"enabled":false,"status":"skipped","exitCode":0}' > "$report_json"
+            exit 0
+          fi
+
+          set +e
+          npx --yes "@salesforce-ux/slds-linter@${SLDS_LINTER_VERSION}" \
+            lint "${{ inputs.source_dir }}" --fix > "$report_log" 2>&1
+          slds_code=$?
+          set -e
+
+          if [ "$slds_code" -eq 0 ]; then
+            status="completed"
+          else
+            status="completed_with_remaining_findings"
+          fi
+
+          {
+            echo "# SLDS Auto-fix"
+            echo
+            echo "- Status: ${status}"
+            echo "- Exit code: ${slds_code}"
+            echo "- Source dir: ${{ inputs.source_dir }}"
+          } > "$report_md"
+
+          echo "{\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${slds_code}}" > "$report_json"
+          echo "SLDS auto-fix status: ${status}. Exit code: ${slds_code}."
 
       - name: Run optional formatter cleanup
         shell: bash
@@ -586,6 +629,20 @@ jobs:
             exit 0
           fi
 
+          if [ "${new_findings:-0}" -gt 0 ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            echo "reason=new analyzer findings detected" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ steps.analyzer-after.outputs.exit_code }}" != "0" ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            echo "reason=analyzer after cleanup did not complete successfully" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ "$formatter_status" = "prettier_failed" ] || [ "$post_fix_prettier_code" -ne 0 ]; then
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "branch=" >> "$GITHUB_OUTPUT"
@@ -632,6 +689,7 @@ jobs:
             const styleBeforePath = 'project/docs/basic-code-cleanup-guard/style-checks-before.json';
             const styleAfterPath = 'project/docs/basic-code-cleanup-guard/style-checks-after.json';
             const cleanupReportPath = 'project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json';
+            const sldsReportPath = 'project/docs/basic-code-cleanup-guard/slds-autofix-report.json';
 
             function readEnvFile(filePath) {
               if (!fs.existsSync(filePath)) return {};
@@ -656,6 +714,7 @@ jobs:
             const styleBefore = readJsonFile(styleBeforePath);
             const styleAfter = readJsonFile(styleAfterPath);
             const cleanupReport = readJsonFile(cleanupReportPath);
+            const sldsReport = readJsonFile(sldsReportPath);
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -685,6 +744,8 @@ jobs:
               `| Fix branch created | PASS |`,
               `| Analyzer new High/Critical findings | ${summary.new_high_or_critical || '0'} |`,
               `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
+              `| SLDS hardcoded-value findings fixed | ${summary.slds_fixed_findings || '0'} |`,
+              `| SLDS auto-fix | ${sldsReport.status || 'not executed'} |`,
               `| Prettier warnings | ${styleBefore.prettierWarnings ?? 0} -> ${styleAfter.prettierWarnings ?? 0} |`,
               `| ESLint problems | ${styleBefore.eslintProblems ?? 0} -> ${styleAfter.eslintProblems ?? 0} |`,
               `| JavaScript cleanup | var->let ${cleanupReport.varToLetFixed ?? 0}, unused event params ${cleanupReport.unusedEventParamsRemoved ?? 0}, let->const ${cleanupReport.letToConstFixed ?? 0}, http->https ${cleanupReport.insecureHttpFixed ?? 0}, structuredClone ${cleanupReport.jsonCloneFixed ?? 0}, crypto random ${cleanupReport.mathRandomFixed ?? 0} |`,
@@ -723,6 +784,7 @@ jobs:
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
+          slds_json="${REPORT_DIR}/slds-autofix-report.json"
           formatting_json="${REPORT_DIR}/formatting-report.json"
           eslint_fix_json="${REPORT_DIR}/eslint-fix-report.json"
           style_before_json="${REPORT_DIR}/style-checks-before.json"
@@ -789,6 +851,14 @@ jobs:
             insecure_http_fixed=0
             json_clone_fixed=0
             math_random_fixed=0
+          fi
+
+          if [ -f "$slds_json" ]; then
+            slds_status="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.status || 'unknown')" "$slds_json")"
+            slds_exit_code="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.exitCode ?? 0)" "$slds_json")"
+          else
+            slds_status="missing_report"
+            slds_exit_code=0
           fi
 
           if [ -f "$formatting_json" ]; then
@@ -863,9 +933,21 @@ jobs:
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
             operator_decision="NOT SAFE"
             operator_reason="New High/Critical findings appeared after cleanup."
+          elif [ "${new_findings:-0}" -gt 0 ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="New analyzer findings appeared after cleanup."
+          elif [ "${prettier_warnings_after}" -gt "${prettier_warnings_before}" ] || [ "${eslint_problems_after}" -gt "${eslint_problems_before}" ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="A style or lint quality signal regressed after cleanup."
+          elif [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+            operator_decision="REVIEW REQUIRED"
+            operator_reason="Salesforce deployment validation was not executed."
+          elif [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="Salesforce deployment validation failed."
           elif [ "${diff_files}" -gt 0 ]; then
             operator_decision="SAFE TO REVIEW"
-            operator_reason="Cleanup patch was generated and is ready for review."
+            operator_reason="Static checks improved and Salesforce deployment validation passed."
           else
             operator_decision="NO CHANGE"
             operator_reason="No cleanup patch was generated."
@@ -878,6 +960,8 @@ jobs:
             echo "- Prettier warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
             echo "- ESLint problems: **${eslint_problems_before} -> ${eslint_problems_after}**"
             echo "- Analyzer findings: **${total_before:-0} -> ${total_after:-0}**"
+            echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
+            echo "- SLDS auto-fix: **${slds_status}** (exit ${slds_exit_code})"
             echo "- JavaScript cleanup: **var->let ${var_to_let_fixed}**, **unused event params ${unused_event_params_removed}**, **let->const ${let_to_const_fixed}**, **http->https ${insecure_http_fixed}**, **structuredClone ${json_clone_fixed}**, **crypto random ${math_random_fixed}**"
             echo "- New High/Critical: **${new_high_or_critical:-0}**"
             echo "- Patch size: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
@@ -909,10 +993,11 @@ jobs:
                 letToConstFixed: Number(process.argv[20]),
                 insecureHttpFixed: Number(process.argv[21]),
                 jsonCloneFixed: Number(process.argv[22]),
-                mathRandomFixed: Number(process.argv[23])
+                mathRandomFixed: Number(process.argv[23]),
+                sldsHardcodedValueFindingsFixed: Number(process.argv[24] || 0)
               }
             };
-            fs.writeFileSync(process.argv[24], JSON.stringify(data, null, 2) + '\n');
+            fs.writeFileSync(process.argv[25], JSON.stringify(data, null, 2) + '\n');
           " \
             "${operator_decision}" \
             "${operator_reason}" \
@@ -937,6 +1022,7 @@ jobs:
             "${insecure_http_fixed}" \
             "${json_clone_fixed}" \
             "${math_random_fixed}" \
+            "${slds_fixed_findings:-0}" \
             "$classification_json"
 
           echo "Cleanup result"
@@ -945,6 +1031,7 @@ jobs:
           echo "Prettier warnings: ${prettier_warnings_before} -> ${prettier_warnings_after}"
           echo "ESLint problems: ${eslint_problems_before} -> ${eslint_problems_after}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
+          echo "SLDS hardcoded-value findings fixed: ${slds_fixed_findings:-0}"
           echo "JavaScript cleanup: var->let ${var_to_let_fixed}, unused event params ${unused_event_params_removed}, let->const ${let_to_const_fixed}, http->https ${insecure_http_fixed}, structuredClone ${json_clone_fixed}, crypto random ${math_random_fixed}"
           echo "New High/Critical: ${new_high_or_critical:-0}"
           echo "::notice title=Cleanup result::${operator_decision}. ${operator_reason} Patch: ${diff_files} files. JS: var->let ${var_to_let_fixed}, unused event ${unused_event_params_removed}, let->const ${let_to_const_fixed}, http->https ${insecure_http_fixed}, structuredClone ${json_clone_fixed}, crypto random ${math_random_fixed}. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
@@ -976,6 +1063,7 @@ jobs:
             echo "- JavaScript http to https fixes: **${insecure_http_fixed}**"
             echo "- JavaScript structuredClone fixes: **${json_clone_fixed}**"
             echo "- JavaScript crypto random fixes: **${math_random_fixed}**"
+            echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
               echo "- Fix branch: \`${FIX_BRANCH_NAME}\`"
               if [ -n "${FIX_PR_URL:-}" ]; then
@@ -1029,6 +1117,9 @@ jobs:
           path: |
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json
+            project/docs/basic-code-cleanup-guard/slds-autofix-report.md
+            project/docs/basic-code-cleanup-guard/slds-autofix-report.json
+            project/docs/basic-code-cleanup-guard/slds-autofix.log
             project/docs/basic-code-cleanup-guard/style-dependencies-report.md
             project/docs/basic-code-cleanup-guard/style-dependencies-report.json
             project/docs/basic-code-cleanup-guard/formatting-report.md
