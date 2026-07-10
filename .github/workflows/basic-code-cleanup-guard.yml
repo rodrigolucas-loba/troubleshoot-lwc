@@ -633,12 +633,14 @@ jobs:
           finish() {
             set +e
             if [ "$baseline_ready" = "true" ] && [ "$visual_org_ready" = "true" ]; then
-              sf project deploy start \
-                --source-dir "${baseline_dir}/${{ inputs.source_dir }}" \
-                --target-org visual-validation-org \
-                --test-level NoTestRun \
-                --wait "${{ inputs.deploy_wait_minutes }}" \
-                > "${report_dir}/lwc-contract-restore.log" 2>&1
+              (
+                cd "$baseline_dir"
+                sf project deploy start \
+                  --source-dir "${{ inputs.source_dir }}" \
+                  --target-org visual-validation-org \
+                  --test-level NoTestRun \
+                  --wait "${{ inputs.deploy_wait_minutes }}"
+              ) > "${report_dir}/lwc-contract-restore.log" 2>&1
               (
                 cd "$baseline_dir"
                 sf project delete source \
@@ -743,12 +745,14 @@ jobs:
           fi
           visual_org_ready=true
 
-          if ! sf project deploy start \
-            --source-dir "${baseline_dir}/${{ inputs.source_dir }}" \
-            --target-org visual-validation-org \
-            --test-level NoTestRun \
-            --wait "${{ inputs.deploy_wait_minutes }}" \
-            > "${report_dir}/lwc-contract-baseline-deploy.log" 2>&1; then
+          if ! (
+            cd "$baseline_dir"
+            sf project deploy start \
+              --source-dir "${{ inputs.source_dir }}" \
+              --target-org visual-validation-org \
+              --test-level NoTestRun \
+              --wait "${{ inputs.deploy_wait_minutes }}"
+          ) > "${report_dir}/lwc-contract-baseline-deploy.log" 2>&1; then
             write_failure "Baseline deployment failed"
             exit 0
           fi
@@ -770,12 +774,14 @@ jobs:
             exit 0
           fi
 
-          if ! sf project deploy start \
-            --source-dir "project/${{ inputs.source_dir }}" \
-            --target-org visual-validation-org \
-            --test-level NoTestRun \
-            --wait "${{ inputs.deploy_wait_minutes }}" \
-            > "${report_dir}/lwc-contract-candidate-deploy.log" 2>&1; then
+          if ! (
+            cd project
+            sf project deploy start \
+              --source-dir "${{ inputs.source_dir }}" \
+              --target-org visual-validation-org \
+              --test-level NoTestRun \
+              --wait "${{ inputs.deploy_wait_minutes }}"
+          ) > "${report_dir}/lwc-contract-candidate-deploy.log" 2>&1; then
             write_failure "Candidate deployment failed"
             exit 0
           fi
