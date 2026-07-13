@@ -1,0 +1,58 @@
+name: Maintenance PR Trust Gate
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  statuses: read
+
+jobs:
+  verify-maintenance-trust:
+    name: Verify maintenance trust
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify automated maintenance status
+        uses: actions/github-script@v8
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const branch = process.env.HEAD_REF;
+            const expectedContext = branch.startsWith('auto/cleanup/')
+              ? 'Cleanup Guard / Automated Trust Gate'
+              : branch.startsWith('auto/api-version/')
+                ? 'API Version Guard / Automated Trust Gate'
+                : null;
+
+            if (!expectedContext) {
+              core.notice('Standard pull request: no automated maintenance status is required.');
+              return;
+            }
+
+            const response = await github.rest.repos.getCombinedStatusForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: process.env.HEAD_SHA
+            });
+            const status = response.data.statuses.find((item) => item.context === expectedContext);
+
+            if (!status) {
+              core.setFailed(`Required status was not published: ${expectedContext}`);
+              return;
+            }
+
+            if (status.state !== 'success') {
+              core.setFailed(`${expectedContext} returned ${status.state}.`);
+              return;
+            }
+
+            core.notice(`${expectedContext} passed for ${process.env.HEAD_SHA}.`);
