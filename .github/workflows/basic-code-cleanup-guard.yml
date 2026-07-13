@@ -217,7 +217,7 @@ jobs:
 
     steps:
       - name: Checkout workflow tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.tools_repository || job.workflow_repository }}
           ref: ${{ inputs.tools_ref || job.workflow_sha }}
@@ -285,9 +285,10 @@ jobs:
           git -C project remote set-url origin "https://github.com/${{ github.repository }}.git"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
+          package-manager-cache: false
 
       - name: Test cleanup guard tools
         working-directory: tools
@@ -1091,7 +1092,7 @@ jobs:
 
       - name: Publish automated trust status
         if: ${{ steps.push-fix.outputs.sha != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           FIX_COMMIT_SHA: ${{ steps.push-fix.outputs.sha }}
           TRUST_GATE_DECISION: ${{ steps.trust-gate.outputs.decision }}
@@ -1114,7 +1115,7 @@ jobs:
       - name: Open cleanup fix pull request
         id: fix-pr
         if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           TARGET_REF: ${{ inputs.target_ref }}
@@ -1595,7 +1596,7 @@ jobs:
 
       - name: Upload basic cleanup artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: basic-code-cleanup-guard-${{ github.run_number }}
           path: |
