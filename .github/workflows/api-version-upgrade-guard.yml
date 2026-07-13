@@ -78,6 +78,8 @@ env:
   INPUT_TEST_LEVEL: ${{ inputs.test_level }}
   INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes }}
   INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix }}
+  INPUT_RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
+  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ inputs.enforce_deploy_validation }}
 
 jobs:
   api-version-upgrade-guard:
@@ -449,6 +451,7 @@ jobs:
             const head = process.env.FIX_BRANCH_NAME;
             const base = process.env.TARGET_REF;
             const summaryPath = 'project/docs/api-version-upgrade-guard/comparison-summary.env';
+            const resolutionPath = 'project/docs/api-version-upgrade-guard/api-version-resolution.json';
 
             function readEnvFile(filePath) {
               if (!fs.existsSync(filePath)) return {};
@@ -464,6 +467,7 @@ jobs:
             }
 
             const summary = readEnvFile(summaryPath);
+            const resolution = JSON.parse(fs.readFileSync(resolutionPath, 'utf8'));
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -491,6 +495,7 @@ jobs:
               '| Rule | Status |',
               '| --- | --- |',
               `| Fix branch created | PASS |`,
+              `| API version resolution | ${resolution.currentProjectVersion || 'not configured'} -> ${resolution.resolved} (${resolution.resolutionSource}) |`,
               `| Analyzer new High/Critical findings | ${summary.new_high_or_critical || '0'} |`,
               `| API version findings | ${summary.api_version_before || '0'} -> ${summary.api_version_after || '0'} |`,
               `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
@@ -526,14 +531,17 @@ jobs:
           FIX_PR_URL: ${{ steps.fix-pr.outputs.url }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
+          RESOLVED_TARGET_API_VERSION: ${{ steps.resolve-api.outputs.target_api_version }}
         run: |
           summary_file="${REPORT_DIR}/comparison-summary.env"
           deploy_log="${REPORT_DIR}/deploy-validation.log"
+          resolution_json="${REPORT_DIR}/api-version-resolution.json"
+          upgrade_json="${REPORT_DIR}/api-version-upgrade-report.json"
 
           append_deploy_validation_summary() {
             echo "### Salesforce Deployment Validation"
             echo
-            if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" != "true" ]; then
               echo "- Status: not executed."
               return
             fi
@@ -545,7 +553,7 @@ jobs:
             else
               echo "- Merge recommendation: **NOT SAFE**"
             fi
-            if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
+            if [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ]; then
               echo "- Enforcement: blocking"
             else
               echo "- Enforcement: advisory"
@@ -583,27 +591,36 @@ jobs:
           . "$summary_file"
           set +a
 
+          current_api_version="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.currentProjectVersion || 'not configured')" "$resolution_json")"
+          resolution_source="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.resolutionSource)" "$resolution_json")"
+          version_files_changed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.realChangedFiles || 0)" "$upgrade_json")"
+
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
             decision="NOT SAFE"
             reason="New High/Critical findings appeared after the API version update."
-          elif [ "${api_version_fixed:-0}" -gt 0 ]; then
+          elif [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            decision="NOT SAFE"
+            reason="Salesforce deployment validation failed after the API version update."
+          elif [ "$version_files_changed" -gt 0 ] && [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ]; then
             decision="SAFE TO REVIEW"
-            reason="API version findings decreased in this run."
-          elif [ "${fixed_findings:-0}" -gt 0 ]; then
-            decision="SAFE TO REVIEW"
-            reason="Analyzer findings decreased in this run."
+            reason="API metadata was upgraded and Salesforce deployment validation passed."
+          elif [ "$version_files_changed" -gt 0 ]; then
+            decision="REVIEW REQUIRED"
+            reason="API metadata was upgraded, but Salesforce deployment validation was not executed."
           else
             decision="NO CHANGE"
-            reason="No analyzer reduction was detected in this run."
+            reason="The project already uses the resolved API version."
           fi
 
           echo "API version result"
           echo "Decision: ${decision}"
           echo "Reason: ${reason}"
+          echo "Resolved API version: ${current_api_version} -> ${RESOLVED_TARGET_API_VERSION} (${resolution_source})"
+          echo "Version files changed: ${version_files_changed}"
           echo "API version findings: ${api_version_before:-0} -> ${api_version_after:-0}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "New High/Critical: ${new_high_or_critical:-0}"
-          echo "::notice title=API version result::${decision}. ${reason} API version: ${api_version_before:-0}->${api_version_after:-0}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
+          echo "::notice title=API version result::${decision}. ${reason} Resolved version: ${current_api_version}->${RESOLVED_TARGET_API_VERSION}. Files changed: ${version_files_changed}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
 
           {
             echo "## API Version Upgrade Result"
@@ -613,6 +630,10 @@ jobs:
             echo "**${decision}**"
             echo
             echo "${reason}"
+            echo
+            echo "- API version: **${current_api_version} -> ${RESOLVED_TARGET_API_VERSION}**"
+            echo "- Resolution source: **${resolution_source}**"
+            echo "- Version files changed: **${version_files_changed}**"
             echo
             echo "| Metric | Before | After |"
             echo "| --- | ---: | ---: |"
@@ -628,14 +649,14 @@ jobs:
               if [ -n "${FIX_PR_URL:-}" ]; then
                 echo "- Pull request: ${FIX_PR_URL}"
               fi
-            elif [ "${{ inputs.enforce_deploy_validation }}" = "true" ] && [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            elif [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ] && [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
               echo "- Fix branch: not created."
               echo "- Reason: deploy validation failed and enforcement is blocking."
             else
               echo "- Fix branch: not created."
               echo "- Reason: ${FIX_BRANCH_REASON:-not applicable}."
             fi
-            if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ]; then
               echo "- Deploy validation: ${DEPLOY_VALIDATION_STATUS:-failed}."
             else
               echo "- Deploy validation: not executed."
