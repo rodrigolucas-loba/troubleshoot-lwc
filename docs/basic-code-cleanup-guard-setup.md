@@ -5,6 +5,6 @@
 3. Replace `<company-org>/<automation-repository>` and pin `uses` and `tools_ref` to the release tag or commit SHA.
 4. Configure `SF_AUTH_URL` and, when LWC contract validation is enabled, `SF_VISUAL_AUTH_URL`.
 5. Configure `TOOLS_REPOSITORY_TOKEN` only when the automation repository is private and the caller token cannot read it.
-6. Require SonarCloud and the cleanup trust gate result before merging generated pull requests.
+6. Protect the target branches and require `SonarCloud Code Analysis` and `Cleanup Guard / Automated Trust Gate` before merge.
 
 The generated pull request remains in draft. `SAFE_TO_REVIEW` means the automated checks passed; it does not replace human approval or external PR checks.

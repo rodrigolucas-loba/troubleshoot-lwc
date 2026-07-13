@@ -188,6 +188,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  statuses: write
 
 env:
   SF_CLI_VERSION: "2.133.4"
@@ -1085,7 +1086,30 @@ jobs:
 
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "branch=$fix_branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "reason=fix branch pushed" >> "$GITHUB_OUTPUT"
+
+      - name: Publish automated trust status
+        if: ${{ steps.push-fix.outputs.sha != '' }}
+        uses: actions/github-script@v7
+        env:
+          FIX_COMMIT_SHA: ${{ steps.push-fix.outputs.sha }}
+          TRUST_GATE_DECISION: ${{ steps.trust-gate.outputs.decision }}
+        with:
+          script: |
+            const decision = process.env.TRUST_GATE_DECISION;
+            const state = decision === 'SAFE_TO_REVIEW' ? 'success' : 'failure';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.FIX_COMMIT_SHA,
+              state,
+              context: 'Cleanup Guard / Automated Trust Gate',
+              description: decision === 'SAFE_TO_REVIEW'
+                ? 'Automated cleanup validations passed'
+                : `Cleanup requires review: ${decision}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
 
       - name: Open cleanup fix pull request
         id: fix-pr
