@@ -147,6 +147,22 @@ function stats(findings) {
   };
 }
 
+function subtractFindings(source, reference) {
+  const remaining = new Map();
+  for (const finding of reference) {
+    remaining.set(finding.key, (remaining.get(finding.key) || 0) + 1);
+  }
+
+  return source.filter((finding) => {
+    const count = remaining.get(finding.key) || 0;
+    if (count === 0) {
+      return true;
+    }
+    remaining.set(finding.key, count - 1);
+    return false;
+  });
+}
+
 function escapeMd(value) {
   return String(value || "").replace(/\|/g, "/").replace(/\r?\n/g, " ");
 }
@@ -180,11 +196,12 @@ async function main() {
   const before = stats(beforeFindings);
   const after = stats(afterFindings);
 
-  const beforeKeys = new Map(beforeFindings.map((finding) => [finding.key, finding]));
-  const afterKeys = new Map(afterFindings.map((finding) => [finding.key, finding]));
-  const newFindings = afterFindings.filter((finding) => !beforeKeys.has(finding.key));
-  const removedFindings = beforeFindings.filter((finding) => !afterKeys.has(finding.key));
+  const newFindings = subtractFindings(afterFindings, beforeFindings);
+  const removedFindings = subtractFindings(beforeFindings, afterFindings);
   const newHighOrCritical = newFindings.filter((finding) => ["critical", "high"].includes(severityRank(finding.severity)));
+  const sldsRule = "@salesforce-ux/slds/no-hardcoded-values-slds2";
+  const sldsRemovedFindings = removedFindings.filter((finding) => finding.rule === sldsRule);
+  const sldsNewFindings = newFindings.filter((finding) => finding.rule === sldsRule);
 
   const delta = {
     total: after.total - before.total,
@@ -193,6 +210,8 @@ async function main() {
     newFindings: newFindings.length,
     removedFindings: removedFindings.length,
     newHighOrCritical: newHighOrCritical.length,
+    sldsFixedFindings: sldsRemovedFindings.length,
+    sldsNewFindings: sldsNewFindings.length,
   };
 
   const decision =
@@ -231,6 +250,7 @@ async function main() {
 | High findings | ${before.high} | ${after.high} | ${delta.high} |
 | New findings | 0 | ${delta.newFindings} | ${delta.newFindings} |
 | Removed findings | ${delta.removedFindings} | 0 | -${delta.removedFindings} |
+| SLDS hardcoded-value findings fixed | ${delta.sldsFixedFindings} | 0 | -${delta.sldsFixedFindings} |
 | New High/Critical findings | 0 | ${delta.newHighOrCritical} | ${delta.newHighOrCritical} |
 
 ## Decision
@@ -260,6 +280,8 @@ ${findingTable(newHighOrCritical)}
       `fixed_findings=${delta.removedFindings}`,
       `new_findings=${delta.newFindings}`,
       `new_high_or_critical=${delta.newHighOrCritical}`,
+      `slds_fixed_findings=${delta.sldsFixedFindings}`,
+      `slds_new_findings=${delta.sldsNewFindings}`,
     ].join("\n") + "\n",
     "utf8",
   );

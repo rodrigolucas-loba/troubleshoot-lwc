@@ -15,7 +15,7 @@ on:
         default: "main"
         type: string
       cleanup_mode:
-        description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint --fix"
+        description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint and SLDS autofix"
         required: true
         default: "safe"
         type: choice
@@ -29,9 +29,14 @@ on:
         default: true
         type: boolean
       create_pull_request:
-        description: "Open a pull request when a fix branch is pushed. Keep false for broad cleanup until the patch is reviewed."
+        description: "Open a pull request when a fix branch is pushed"
         required: true
-        default: false
+        default: true
+        type: boolean
+      draft_pull_request:
+        description: "Create the automated pull request as draft so external quality gates can be reviewed first"
+        required: true
+        default: true
         type: boolean
       fix_branch_prefix:
         description: "Prefix for the generated fix branch"
@@ -46,7 +51,7 @@ on:
       enforce_deploy_validation:
         description: "Fail the workflow and block the fix branch when Salesforce deploy validation fails"
         required: true
-        default: false
+        default: true
         type: boolean
       test_level:
         description: "Salesforce deploy validation test level"
@@ -62,26 +67,161 @@ on:
         required: true
         default: "30"
         type: string
+      run_lwc_contract_validation:
+        description: "Deploy baseline and candidate to a dedicated org and compare LWC runtime contracts"
+        required: true
+        default: false
+        type: boolean
+      enforce_lwc_contract_validation:
+        description: "Block the fix branch when the optional LWC runtime contract differs"
+        required: true
+        default: true
+        type: boolean
+      allow_primary_auth_for_lwc_contract:
+        description: "POC only: allow SF_AUTH_URL when SF_VISUAL_AUTH_URL is unavailable"
+        required: true
+        default: false
+        type: boolean
+      lwc_contract_tolerance_px:
+        description: "Allowed width/height difference in pixels for LWC runtime contracts"
+        required: true
+        default: "1"
+        type: string
+      lwc_contract_wait_ms:
+        description: "Milliseconds to wait for Lightning components to render"
+        required: true
+        default: "8000"
+        type: string
+      tools_repository:
+        description: "Optional repository containing the cleanup guard scripts"
+        required: false
+        default: ""
+        type: string
+      tools_ref:
+        description: "Optional commit SHA or tag for the cleanup guard scripts"
+        required: false
+        default: ""
+        type: string
+
+  workflow_call:
+    inputs:
+      source_dir:
+        required: false
+        default: "force-app"
+        type: string
+      target_ref:
+        required: false
+        default: "main"
+        type: string
+      cleanup_mode:
+        required: false
+        default: "safe"
+        type: string
+      create_fix_branch:
+        required: false
+        default: true
+        type: boolean
+      create_pull_request:
+        required: false
+        default: true
+        type: boolean
+      draft_pull_request:
+        required: false
+        default: true
+        type: boolean
+      fix_branch_prefix:
+        required: false
+        default: "auto/cleanup"
+        type: string
+      run_deploy_validate:
+        required: false
+        default: true
+        type: boolean
+      enforce_deploy_validation:
+        required: false
+        default: true
+        type: boolean
+      test_level:
+        required: false
+        default: "RunRelevantTests"
+        type: string
+      deploy_wait_minutes:
+        required: false
+        default: "30"
+        type: string
+      run_lwc_contract_validation:
+        required: false
+        default: false
+        type: boolean
+      enforce_lwc_contract_validation:
+        required: false
+        default: true
+        type: boolean
+      allow_primary_auth_for_lwc_contract:
+        required: false
+        default: false
+        type: boolean
+      lwc_contract_tolerance_px:
+        required: false
+        default: "1"
+        type: string
+      lwc_contract_wait_ms:
+        required: false
+        default: "8000"
+        type: string
+      tools_repository:
+        required: false
+        default: ""
+        type: string
+      tools_ref:
+        required: false
+        default: ""
+        type: string
+    secrets:
+      SF_AUTH_URL:
+        required: false
+      SF_VISUAL_AUTH_URL:
+        required: false
+      TOOLS_REPOSITORY_TOKEN:
+        required: false
 
 permissions:
   contents: write
   pull-requests: write
+  statuses: write
 
 env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
+  SLDS_LINTER_VERSION: "1.2.1"
+  PLAYWRIGHT_VERSION: "1.60.0"
   REPORT_DIR: "docs/basic-code-cleanup-guard"
+  INPUT_SOURCE_DIR: ${{ inputs.source_dir }}
+  INPUT_TARGET_REF: ${{ inputs.target_ref }}
+  INPUT_CLEANUP_MODE: ${{ inputs.cleanup_mode }}
+  INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix }}
+  INPUT_TEST_LEVEL: ${{ inputs.test_level }}
+  INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes }}
+  INPUT_LWC_CONTRACT_TOLERANCE_PX: ${{ inputs.lwc_contract_tolerance_px }}
+  INPUT_LWC_CONTRACT_WAIT_MS: ${{ inputs.lwc_contract_wait_ms }}
+  INPUT_ALLOW_PRIMARY_AUTH_FOR_LWC_CONTRACT: ${{ inputs.allow_primary_auth_for_lwc_contract }}
+  INPUT_RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
+  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ inputs.enforce_deploy_validation }}
+  INPUT_RUN_LWC_CONTRACT_VALIDATION: ${{ inputs.run_lwc_contract_validation }}
 
 jobs:
   basic-code-cleanup-guard:
     name: Test basic code cleanup
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout workflow tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          repository: ${{ inputs.tools_repository || job.workflow_repository }}
+          ref: ${{ inputs.tools_ref || job.workflow_sha }}
+          token: ${{ secrets.TOOLS_REPOSITORY_TOKEN || github.token }}
           fetch-depth: 0
           path: tools
           submodules: false
@@ -96,17 +236,63 @@ jobs:
 
           git clone \
             --no-recurse-submodules \
-            --branch "${{ inputs.target_ref }}" \
+            --branch "$INPUT_TARGET_REF" \
             --depth 1 \
             "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
             project
 
+      - name: Validate workflow inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$INPUT_SOURCE_DIR" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+             [[ "$INPUT_SOURCE_DIR" = /* ]] ||
+             [[ "$INPUT_SOURCE_DIR" =~ (^|/)\.\.(/|$) ]]; then
+            echo "Invalid source_dir: use a relative path inside the repository." >&2
+            exit 1
+          fi
+
+          if ! git check-ref-format --branch "$INPUT_TARGET_REF" >/dev/null 2>&1; then
+            echo "Invalid target_ref: expected a valid branch or tag name." >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_DEPLOY_WAIT_MINUTES" =~ ^[0-9]+$ ]] ||
+             (( INPUT_DEPLOY_WAIT_MINUTES < 1 || INPUT_DEPLOY_WAIT_MINUTES > 120 )); then
+            echo "Invalid deploy_wait_minutes: expected an integer from 1 to 120." >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_LWC_CONTRACT_WAIT_MS" =~ ^[0-9]+$ ]] ||
+             (( INPUT_LWC_CONTRACT_WAIT_MS < 1000 || INPUT_LWC_CONTRACT_WAIT_MS > 60000 )); then
+            echo "Invalid lwc_contract_wait_ms: expected an integer from 1000 to 60000." >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_LWC_CONTRACT_TOLERANCE_PX" =~ ^[0-9]+$ ]] ||
+             (( INPUT_LWC_CONTRACT_TOLERANCE_PX > 20 )); then
+            echo "Invalid lwc_contract_tolerance_px: expected an integer from 0 to 20." >&2
+            exit 1
+          fi
+
+          candidate_branch="$INPUT_FIX_BRANCH_PREFIX/$INPUT_CLEANUP_MODE/validation"
+          if ! git check-ref-format --branch "$candidate_branch" >/dev/null 2>&1; then
+            echo "Invalid fix_branch_prefix: it does not produce a valid Git branch." >&2
+            exit 1
+          fi
+
           git -C project remote set-url origin "https://github.com/${{ github.repository }}.git"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
+          package-manager-cache: false
+
+      - name: Test cleanup guard tools
+        working-directory: tools
+        run: npm test
 
       - name: Install Salesforce CLI
         shell: bash
@@ -184,7 +370,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
+          npx prettier --check "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
           prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
@@ -211,7 +397,7 @@ jobs:
           set +e
           sf code-analyzer run \
             --workspace . \
-            --target "${{ inputs.source_dir }}" \
+            --target "$INPUT_SOURCE_DIR" \
             --rule-selector Recommended \
             --output-file "${REPORT_DIR}/analyzer-before.csv" \
             --view table
@@ -219,14 +405,66 @@ jobs:
           echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Apply analyzer-guided safe fixes
+        shell: bash
+        working-directory: project
+        run: |
+          node ../tools/scripts/nodejs/apply-analyzer-guided-fixes.mjs \
+            --root . \
+            --report "${REPORT_DIR}/analyzer-before.csv" \
+            --json "${REPORT_DIR}/analyzer-guided-fixes.json" \
+            --markdown "${REPORT_DIR}/analyzer-guided-fixes.md"
+
       - name: Apply basic cleanup in runner
         shell: bash
         working-directory: project
         run: |
           node ../tools/scripts/nodejs/basic-code-cleanup-guard.mjs \
-            --source-dir "${{ inputs.source_dir }}" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --report "${REPORT_DIR}/basic-code-cleanup-report.md" \
             --json "${REPORT_DIR}/basic-code-cleanup-report.json"
+
+      - name: Run optional SLDS auto-fix
+        shell: bash
+        working-directory: project
+        run: |
+          report_md="${REPORT_DIR}/slds-autofix-report.md"
+          report_json="${REPORT_DIR}/slds-autofix-report.json"
+          report_log="${REPORT_DIR}/slds-autofix.log"
+
+          if [ "$INPUT_CLEANUP_MODE" != "format_lintfix" ]; then
+            {
+              echo "# SLDS Auto-fix"
+              echo
+              echo "- Status: skipped"
+              echo "- Reason: cleanup_mode is not format_lintfix"
+            } > "$report_md"
+            echo '{"enabled":false,"status":"skipped","exitCode":0}' > "$report_json"
+            exit 0
+          fi
+
+          set +e
+          npx --yes "@salesforce-ux/slds-linter@${SLDS_LINTER_VERSION}" \
+            lint "$INPUT_SOURCE_DIR" --fix > "$report_log" 2>&1
+          slds_code=$?
+          set -e
+
+          if [ "$slds_code" -eq 0 ]; then
+            status="completed"
+          else
+            status="completed_with_remaining_findings"
+          fi
+
+          {
+            echo "# SLDS Auto-fix"
+            echo
+            echo "- Status: ${status}"
+            echo "- Exit code: ${slds_code}"
+            echo "- Source dir: $INPUT_SOURCE_DIR"
+          } > "$report_md"
+
+          echo "{\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${slds_code}}" > "$report_json"
+          echo "SLDS auto-fix status: ${status}. Exit code: ${slds_code}."
 
       - name: Run optional formatter cleanup
         shell: bash
@@ -235,7 +473,7 @@ jobs:
           report_md="${REPORT_DIR}/formatting-report.md"
           report_json="${REPORT_DIR}/formatting-report.json"
 
-          if [ "${{ inputs.cleanup_mode }}" = "safe" ]; then
+          if [ "$INPUT_CLEANUP_MODE" = "safe" ]; then
             {
               echo "# Formatting Cleanup"
               echo
@@ -253,7 +491,7 @@ jobs:
             {
               echo "# Formatting Cleanup"
               echo
-              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Mode: $INPUT_CLEANUP_MODE"
               echo "- Status: skipped"
               echo
               echo "package.json was not found, so Prettier could not be installed."
@@ -267,7 +505,7 @@ jobs:
             {
               echo "# Formatting Cleanup"
               echo
-              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Mode: $INPUT_CLEANUP_MODE"
               echo "- Status: skipped"
               echo
               echo "Project style dependencies were not installed."
@@ -278,7 +516,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
+          npx prettier --write "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
           prettier_code=$?
 
           if [ "$prettier_code" -eq 0 ]; then
@@ -290,10 +528,10 @@ jobs:
           {
             echo "# Formatting Cleanup"
             echo
-            echo "- Mode: ${{ inputs.cleanup_mode }}"
+            echo "- Mode: $INPUT_CLEANUP_MODE"
             echo "- Status: ${status}"
             echo "- Prettier exit code: ${prettier_code}"
-            echo "- Scope: ${{ inputs.source_dir }}"
+            echo "- Scope: $INPUT_SOURCE_DIR"
           } > "$report_md"
 
           echo "{\"mode\":\"format\",\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${prettier_code}}" > "$report_json"
@@ -308,17 +546,17 @@ jobs:
           report_json="${REPORT_DIR}/eslint-fix-report.json"
           eslint_fix_log="${REPORT_DIR}/eslint-fix.txt"
 
-          if [ "${{ inputs.cleanup_mode }}" != "format_lintfix" ]; then
+          if [ "$INPUT_CLEANUP_MODE" != "format_lintfix" ]; then
             {
               echo "# ESLint Auto-fix"
               echo
-              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Mode: $INPUT_CLEANUP_MODE"
               echo "- Status: skipped"
               echo
               echo "ESLint --fix was not requested."
             } > "$report_md"
             echo '{"enabled":false,"status":"skipped","eslintFixExitCode":0,"postFixPrettierExitCode":0}' > "$report_json"
-            echo "ESLint auto-fix skipped. cleanup_mode=${{ inputs.cleanup_mode }}."
+            echo "ESLint auto-fix skipped. cleanup_mode=$INPUT_CLEANUP_MODE."
             exit 0
           fi
 
@@ -340,7 +578,7 @@ jobs:
           npx eslint **/{aura,lwc}/**/*.js --fix > "$eslint_fix_log" 2>&1
           eslint_fix_code=$?
 
-          npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
+          npx prettier --write "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
           post_fix_prettier_code=$?
 
           if [ "$eslint_fix_code" -eq 0 ]; then
@@ -380,7 +618,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
+          npx prettier --check "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
           prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
@@ -429,7 +667,7 @@ jobs:
           set +e
           sf code-analyzer run \
             --workspace . \
-            --target "${{ inputs.source_dir }}" \
+            --target "$INPUT_SOURCE_DIR" \
             --rule-selector Recommended \
             --output-file "${REPORT_DIR}/analyzer-after.csv" \
             --view table
@@ -445,8 +683,8 @@ jobs:
             --before "${REPORT_DIR}/analyzer-before.csv" \
             --after "${REPORT_DIR}/analyzer-after.csv" \
             --out-dir "${REPORT_DIR}" \
-            --target-ref "${{ inputs.target_ref }}" \
-            --source-dir "${{ inputs.source_dir }}" \
+            --target-ref "$INPUT_TARGET_REF" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
             --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
 
@@ -498,10 +736,10 @@ jobs:
             } >> "$report_log"
 
             sf project deploy validate \
-              --source-dir "${{ inputs.source_dir }}" \
+              --source-dir "$INPUT_SOURCE_DIR" \
               --target-org validation-org \
-              --test-level "${{ inputs.test_level }}" \
-              --wait "${{ inputs.deploy_wait_minutes }}" >> "$report_log" 2>&1
+              --test-level "$INPUT_TEST_LEVEL" \
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES" >> "$report_log" 2>&1
             validate_code=$?
           fi
           set -e
@@ -516,8 +754,8 @@ jobs:
             echo "# Deploy validation"
             echo
             echo "- Status: ${status}"
-            echo "- Test level: ${{ inputs.test_level }}"
-            echo "- Source dir: ${{ inputs.source_dir }}"
+            echo "- Test level: $INPUT_TEST_LEVEL"
+            echo "- Source dir: $INPUT_SOURCE_DIR"
             echo "- Exit code: ${validate_code}"
           } > "$report_md"
 
@@ -527,9 +765,243 @@ jobs:
           cat "$report_log"
           exit 0
 
+      - name: Validate LWC runtime contracts
+        id: lwc-contract
+        if: ${{ inputs.run_lwc_contract_validation }}
+        shell: bash
+        env:
+          SF_VISUAL_AUTH_URL: ${{ secrets.SF_VISUAL_AUTH_URL }}
+          SF_PRIMARY_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: |
+          set -uo pipefail
+
+          report_dir="project/${REPORT_DIR}"
+          report_md="${report_dir}/lwc-contract-validation.md"
+          report_json="${report_dir}/lwc-contract-validation.json"
+          changed_files="${report_dir}/changed-files.txt"
+          baseline_dir="${GITHUB_WORKSPACE}/lwc-contract-baseline"
+          auth_file="$(mktemp)"
+          baseline_ready=false
+          visual_org_ready=false
+
+          finish() {
+            set +e
+            if [ "$baseline_ready" = "true" ] && [ "$visual_org_ready" = "true" ]; then
+              (
+                cd "$baseline_dir"
+                sf project deploy start \
+                  --source-dir "$INPUT_SOURCE_DIR" \
+                  --target-org visual-validation-org \
+                  --test-level NoTestRun \
+                  --wait "$INPUT_DEPLOY_WAIT_MINUTES"
+              ) > "${report_dir}/lwc-contract-restore.log" 2>&1
+              (
+                cd "$baseline_dir"
+                sf project delete source \
+                  --metadata "LightningComponentBundle:autofixValidationHarness" \
+                  --metadata "AuraDefinitionBundle:autofixValidationHarnessHost" \
+                  --target-org visual-validation-org \
+                  --test-level NoTestRun \
+                  --wait "$INPUT_DEPLOY_WAIT_MINUTES" \
+                  --no-prompt
+              ) > "${report_dir}/lwc-contract-harness-cleanup.log" 2>&1 || true
+            fi
+            rm -f "$auth_file" "${report_dir}/lwc-contract-url.json"
+            rm -rf \
+              "project/$INPUT_SOURCE_DIR/main/default/lwc/autofixValidationHarness" \
+              "project/$INPUT_SOURCE_DIR/main/default/aura/autofixValidationHarnessHost" \
+              "$baseline_dir"
+          }
+          trap finish EXIT
+
+          write_failure() {
+            local reason="$1"
+            printf '{"status":"failed","reason":"%s"}\n' "$reason" > "$report_json"
+            {
+              echo "# LWC contract validation"
+              echo
+              echo "- Status: **failed**"
+              echo "- Reason: ${reason}"
+            } > "$report_md"
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          }
+
+          selected_auth_url="${SF_VISUAL_AUTH_URL:-}"
+          if [ -z "$selected_auth_url" ] && [ "$INPUT_ALLOW_PRIMARY_AUTH_FOR_LWC_CONTRACT" = "true" ]; then
+            selected_auth_url="${SF_PRIMARY_AUTH_URL:-}"
+          fi
+          if [ -z "$selected_auth_url" ]; then
+            write_failure "SF_VISUAL_AUTH_URL is not configured and the primary auth fallback is disabled"
+            exit 0
+          fi
+
+          lwc_prefix="$INPUT_SOURCE_DIR/main/default/lwc/"
+          if ! awk -v prefix="$lwc_prefix" 'index($0, prefix) == 1 { found=1; exit } END { exit !found }' "$changed_files"; then
+            echo '{"status":"skipped_no_lwc","componentsChecked":0}' > "$report_json"
+            {
+              echo "# LWC contract validation"
+              echo
+              echo "- Status: **skipped_no_lwc**"
+              echo "- Components checked: **0**"
+            } > "$report_md"
+            echo "status=skipped_no_lwc" >> "$GITHUB_OUTPUT"
+            echo "reason=no changed LWC bundles" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git clone --quiet --no-hardlinks --no-recurse-submodules project "$baseline_dir"; then
+            write_failure "Baseline checkout failed"
+            exit 0
+          fi
+
+          if ! node tools/scripts/nodejs/generate-lwc-contract-harness.mjs \
+            --project-root "$baseline_dir" \
+            --source-dir "$INPUT_SOURCE_DIR" \
+            --changed-files "$changed_files" \
+            --manifest "${report_dir}/lwc-contract-manifest.json"; then
+            write_failure "Baseline LWC harness generation failed"
+            exit 0
+          fi
+          if ! node tools/scripts/nodejs/generate-lwc-contract-harness.mjs \
+            --project-root project \
+            --source-dir "$INPUT_SOURCE_DIR" \
+            --changed-files "$changed_files" \
+            --manifest "${report_dir}/lwc-contract-manifest.json"; then
+            write_failure "Candidate LWC harness generation failed"
+            exit 0
+          fi
+
+          component_count="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.components.length)" "${report_dir}/lwc-contract-manifest.json")"
+          if [ "$component_count" -eq 0 ]; then
+            echo '{"status":"skipped_no_lwc","componentsChecked":0}' > "$report_json"
+            echo "# LWC contract validation" > "$report_md"
+            echo "status=skipped_no_lwc" >> "$GITHUB_OUTPUT"
+            echo "reason=no deployable changed LWC bundles" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! npm install --prefix tools --no-save --no-package-lock "playwright@${PLAYWRIGHT_VERSION}" \
+            > "${report_dir}/lwc-contract-playwright-install.log" 2>&1; then
+            write_failure "Playwright installation failed"
+            exit 0
+          fi
+          if ! (cd tools && npx playwright install --with-deps chromium) \
+            >> "${report_dir}/lwc-contract-playwright-install.log" 2>&1; then
+            write_failure "Chromium installation failed"
+            exit 0
+          fi
+
+          printf '%s' "$selected_auth_url" > "$auth_file"
+          if ! sf org login sfdx-url --sfdx-url-file "$auth_file" --alias visual-validation-org \
+            > "${report_dir}/lwc-contract-auth.log" 2>&1; then
+            write_failure "Salesforce visual validation org authentication failed"
+            exit 0
+          fi
+          visual_org_ready=true
+
+          if ! (
+            cd "$baseline_dir"
+            sf project deploy start \
+              --source-dir "$INPUT_SOURCE_DIR" \
+              --target-org visual-validation-org \
+              --test-level NoTestRun \
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES"
+          ) > "${report_dir}/lwc-contract-baseline-deploy.log" 2>&1; then
+            write_failure "Baseline deployment failed"
+            exit 0
+          fi
+          baseline_ready=true
+
+          route="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.route)" "${report_dir}/lwc-contract-manifest.json")"
+          if ! sf org open --target-org visual-validation-org --path "$route" --url-only --json \
+            > "${report_dir}/lwc-contract-url.json" 2> "${report_dir}/lwc-contract-browser.log"; then
+            write_failure "Baseline harness URL generation failed"
+            exit 0
+          fi
+          if ! node tools/scripts/nodejs/capture-lwc-contract.mjs \
+            --url-json "${report_dir}/lwc-contract-url.json" \
+            --manifest "${report_dir}/lwc-contract-manifest.json" \
+            --output "${report_dir}/lwc-contract-baseline.json" \
+            --wait-ms "$INPUT_LWC_CONTRACT_WAIT_MS" \
+            >> "${report_dir}/lwc-contract-browser.log" 2>&1; then
+            write_failure "Baseline LWC contract capture failed"
+            exit 0
+          fi
+
+          if ! (
+            cd project
+            sf project deploy start \
+              --source-dir "$INPUT_SOURCE_DIR" \
+              --target-org visual-validation-org \
+              --test-level NoTestRun \
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES"
+          ) > "${report_dir}/lwc-contract-candidate-deploy.log" 2>&1; then
+            write_failure "Candidate deployment failed"
+            exit 0
+          fi
+
+          if ! sf org open --target-org visual-validation-org --path "$route" --url-only --json \
+            > "${report_dir}/lwc-contract-url.json" 2>> "${report_dir}/lwc-contract-browser.log"; then
+            write_failure "Candidate harness URL generation failed"
+            exit 0
+          fi
+          if ! node tools/scripts/nodejs/capture-lwc-contract.mjs \
+            --url-json "${report_dir}/lwc-contract-url.json" \
+            --manifest "${report_dir}/lwc-contract-manifest.json" \
+            --output "${report_dir}/lwc-contract-candidate.json" \
+            --wait-ms "$INPUT_LWC_CONTRACT_WAIT_MS" \
+            >> "${report_dir}/lwc-contract-browser.log" 2>&1; then
+            write_failure "Candidate LWC contract capture failed"
+            exit 0
+          fi
+
+          set +e
+          node tools/scripts/nodejs/compare-lwc-contracts.mjs \
+            --baseline "${report_dir}/lwc-contract-baseline.json" \
+            --candidate "${report_dir}/lwc-contract-candidate.json" \
+            --json "$report_json" \
+            --markdown "$report_md" \
+            --tolerance-px "$INPUT_LWC_CONTRACT_TOLERANCE_PX"
+          compare_code=$?
+          set -e
+
+          if [ "$compare_code" -eq 0 ]; then
+            status="passed"
+            reason="runtime contracts match"
+          else
+            status="failed"
+            reason="runtime contract differences detected"
+          fi
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Evaluate automated trust gate
+        id: trust-gate
+        shell: bash
+        env:
+          ANALYZER_AFTER_EXIT_CODE: ${{ steps.analyzer-after.outputs.exit_code }}
+          DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
+          LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
+          INPUT_ENFORCE_LWC_CONTRACT_VALIDATION: ${{ inputs.enforce_lwc_contract_validation }}
+        run: |
+          node tools/scripts/nodejs/evaluate-cleanup-trust-gate.mjs \
+            --report-dir "project/$REPORT_DIR" \
+            --source-dir "$INPUT_SOURCE_DIR" \
+            --analyzer-after-exit-code "$ANALYZER_AFTER_EXIT_CODE" \
+            --deploy-requested "$INPUT_RUN_DEPLOY_VALIDATE" \
+            --deploy-enforced "$INPUT_ENFORCE_DEPLOY_VALIDATION" \
+            --deploy-status "${DEPLOY_VALIDATION_STATUS:-not_executed}" \
+            --lwc-requested "$INPUT_RUN_LWC_CONTRACT_VALIDATION" \
+            --lwc-enforced "$INPUT_ENFORCE_LWC_CONTRACT_VALIDATION" \
+            --lwc-status "${LWC_CONTRACT_STATUS:-not_executed}" \
+            --json "project/$REPORT_DIR/trust-gate.json" \
+            --markdown "project/$REPORT_DIR/trust-gate.md"
+
       - name: Push cleanup fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch && (!inputs.enforce_deploy_validation || !inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        if: ${{ inputs.create_fix_branch && steps.trust-gate.outputs.allow_fix_branch == 'true' }}
         shell: bash
         working-directory: project
         env:
@@ -581,6 +1053,20 @@ jobs:
             exit 0
           fi
 
+          if [ "${new_findings:-0}" -gt 0 ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            echo "reason=new analyzer findings detected" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ steps.analyzer-after.outputs.exit_code }}" != "0" ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            echo "reason=analyzer after cleanup did not complete successfully" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ "$formatter_status" = "prettier_failed" ] || [ "$post_fix_prettier_code" -ne 0 ]; then
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "branch=" >> "$GITHUB_OUTPUT"
@@ -588,8 +1074,8 @@ jobs:
             exit 0
           fi
 
-          safe_mode="$(printf '%s' "${{ inputs.cleanup_mode }}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
-          fix_branch="${{ inputs.fix_branch_prefix }}/${safe_mode}/run-${{ github.run_id }}-${{ github.run_attempt }}"
+          safe_mode="$(printf '%s' "$INPUT_CLEANUP_MODE" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
+          fix_branch="$INPUT_FIX_BRANCH_PREFIX/${safe_mode}/run-${{ github.run_id }}-${{ github.run_attempt }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -601,23 +1087,86 @@ jobs:
 
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "branch=$fix_branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "reason=fix branch pushed" >> "$GITHUB_OUTPUT"
+
+      - name: Publish automated trust status
+        if: ${{ steps.push-fix.outputs.sha != '' }}
+        uses: actions/github-script@v8
+        env:
+          FIX_COMMIT_SHA: ${{ steps.push-fix.outputs.sha }}
+          TRUST_GATE_DECISION: ${{ steps.trust-gate.outputs.decision }}
+        with:
+          script: |
+            const decision = process.env.TRUST_GATE_DECISION;
+            const state = decision === 'SAFE_TO_REVIEW' ? 'success' : 'failure';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.FIX_COMMIT_SHA,
+              state,
+              context: 'Cleanup Guard / Automated Trust Gate',
+              description: decision === 'SAFE_TO_REVIEW'
+                ? 'Automated cleanup validations passed'
+                : `Cleanup requires review: ${decision}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
 
       - name: Open cleanup fix pull request
         id: fix-pr
         if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           TARGET_REF: ${{ inputs.target_ref }}
           CLEANUP_MODE: ${{ inputs.cleanup_mode }}
           SOURCE_DIR: ${{ inputs.source_dir }}
+          DRAFT_PULL_REQUEST: ${{ inputs.draft_pull_request }}
+          DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
+          DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
+          LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
+          LWC_CONTRACT_REASON: ${{ steps.lwc-contract.outputs.reason }}
+          TRUST_GATE_DECISION: ${{ steps.trust-gate.outputs.decision }}
         with:
           script: |
+            const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const head = process.env.FIX_BRANCH_NAME;
             const base = process.env.TARGET_REF;
+            const summaryPath = 'project/docs/basic-code-cleanup-guard/comparison-summary.env';
+            const diffSummaryPath = 'project/docs/basic-code-cleanup-guard/diff-summary.env';
+            const styleBeforePath = 'project/docs/basic-code-cleanup-guard/style-checks-before.json';
+            const styleAfterPath = 'project/docs/basic-code-cleanup-guard/style-checks-after.json';
+            const cleanupReportPath = 'project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json';
+            const sldsReportPath = 'project/docs/basic-code-cleanup-guard/slds-autofix-report.json';
+            const guidedFixesPath = 'project/docs/basic-code-cleanup-guard/analyzer-guided-fixes.json';
+
+            function readEnvFile(filePath) {
+              if (!fs.existsSync(filePath)) return {};
+              return Object.fromEntries(
+                fs.readFileSync(filePath, 'utf8')
+                  .split(/\r?\n/)
+                  .filter(Boolean)
+                  .map((line) => {
+                    const index = line.indexOf('=');
+                    return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
+                  })
+              );
+            }
+
+            function readJsonFile(filePath) {
+              if (!fs.existsSync(filePath)) return {};
+              return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            }
+
+            const summary = readEnvFile(summaryPath);
+            const diffSummary = readEnvFile(diffSummaryPath);
+            const styleBefore = readJsonFile(styleBeforePath);
+            const styleAfter = readJsonFile(styleAfterPath);
+            const cleanupReport = readJsonFile(cleanupReportPath);
+            const sldsReport = readJsonFile(sldsReportPath);
+            const guidedFixes = readJsonFile(guidedFixesPath);
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -640,6 +1189,27 @@ jobs:
               `- Source directory: ${process.env.SOURCE_DIR}`,
               `- Workflow run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
               '',
+              '## Trust Ruleset',
+              '',
+              '| Rule | Status |',
+              '| --- | --- |',
+              `| Automated trust gate | ${process.env.TRUST_GATE_DECISION || 'REVIEW'} |`,
+              `| Fix branch created | PASS |`,
+              `| Analyzer new High/Critical findings | ${summary.new_high_or_critical || '0'} |`,
+              `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
+              `| SLDS hardcoded-value findings fixed | ${summary.slds_fixed_findings || '0'} |`,
+              `| SLDS auto-fix | ${sldsReport.status || 'not executed'} |`,
+              `| Analyzer-guided safe fixes | ${guidedFixes.totalFixes || '0'} |`,
+              `| Prettier warnings | ${styleBefore.prettierWarnings ?? 0} -> ${styleAfter.prettierWarnings ?? 0} |`,
+              `| ESLint problems | ${styleBefore.eslintProblems ?? 0} -> ${styleAfter.eslintProblems ?? 0} |`,
+              `| JavaScript cleanup | var->let ${cleanupReport.varToLetFixed ?? 0}, unused event params ${cleanupReport.unusedEventParamsRemoved ?? 0}, let->const ${cleanupReport.letToConstFixed ?? 0}, http->https ${cleanupReport.insecureHttpFixed ?? 0}, structuredClone ${cleanupReport.jsonCloneFixed ?? 0}, crypto random ${cleanupReport.mathRandomFixed ?? 0} |`,
+              `| Patch size | ${diffSummary.diff_files || '0'} files, ${diffSummary.diff_insertions || '0'} insertions, ${diffSummary.diff_deletions || '0'} deletions |`,
+              `| Salesforce deploy validation | ${process.env.DEPLOY_VALIDATION_STATUS || 'not executed'} (${process.env.DEPLOY_VALIDATION_EXIT_CODE || 'unknown'}) |`,
+              `| LWC runtime contract | ${process.env.LWC_CONTRACT_STATUS || 'not executed'} |`,
+              `| External PR checks | PENDING |`,
+              '',
+              'Rules: keep this PR as draft until external checks pass and the generated patch has been reviewed.',
+              '',
               'Review the patch and workflow artifacts before merging.'
             ].join('\n');
 
@@ -649,7 +1219,8 @@ jobs:
               title: `Apply basic code cleanup (${process.env.CLEANUP_MODE})`,
               head,
               base,
-              body
+              body,
+              draft: process.env.DRAFT_PULL_REQUEST === 'true'
             });
 
             core.setOutput('url', pull.data.html_url);
@@ -666,8 +1237,12 @@ jobs:
           FIX_PR_URL: ${{ steps.fix-pr.outputs.url }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
+          LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
+          LWC_CONTRACT_REASON: ${{ steps.lwc-contract.outputs.reason }}
         run: |
           cleanup_json="${REPORT_DIR}/basic-code-cleanup-report.json"
+          guided_json="${REPORT_DIR}/analyzer-guided-fixes.json"
+          slds_json="${REPORT_DIR}/slds-autofix-report.json"
           formatting_json="${REPORT_DIR}/formatting-report.json"
           eslint_fix_json="${REPORT_DIR}/eslint-fix-report.json"
           style_before_json="${REPORT_DIR}/style-checks-before.json"
@@ -675,11 +1250,12 @@ jobs:
           summary_file="${REPORT_DIR}/comparison-summary.env"
           diff_summary_file="${REPORT_DIR}/diff-summary.env"
           deploy_log="${REPORT_DIR}/deploy-validation.log"
+          lwc_contract_json="${REPORT_DIR}/lwc-contract-validation.json"
 
           append_deploy_validation_summary() {
             echo "### Salesforce Deployment Validation"
             echo
-            if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" != "true" ]; then
               echo "- Status: not executed."
               return
             fi
@@ -691,7 +1267,7 @@ jobs:
             else
               echo "- Merge recommendation: **NOT SAFE**"
             fi
-            if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
+            if [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ]; then
               echo "- Enforcement: blocking"
             else
               echo "- Enforcement: advisory"
@@ -718,10 +1294,42 @@ jobs:
             changed_files="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.changedFiles || 0)" "$cleanup_json")"
             trailing_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.trailingWhitespaceLinesFixed || 0)" "$cleanup_json")"
             final_newlines="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.finalNewlinesAdded || 0)" "$cleanup_json")"
+            var_to_let_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.varToLetFixed || 0)" "$cleanup_json")"
+            unused_event_params_removed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.unusedEventParamsRemoved || 0)" "$cleanup_json")"
+            let_to_const_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.letToConstFixed || 0)" "$cleanup_json")"
+            insecure_http_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.insecureHttpFixed || 0)" "$cleanup_json")"
+            json_clone_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.jsonCloneFixed || 0)" "$cleanup_json")"
+            math_random_fixed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.mathRandomFixed || 0)" "$cleanup_json")"
           else
             changed_files=0
             trailing_fixed=0
             final_newlines=0
+            var_to_let_fixed=0
+            unused_event_params_removed=0
+            let_to_const_fixed=0
+            insecure_http_fixed=0
+            json_clone_fixed=0
+            math_random_fixed=0
+          fi
+
+          if [ -f "$guided_json" ]; then
+            guided_total="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.totalFixes || 0)" "$guided_json")"
+            guided_slds="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.sldsHooks || 0)" "$guided_json")"
+            guided_annotations="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.apexAnnotations || 0)" "$guided_json")"
+            guided_braces="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.apexBraces || 0)" "$guided_json")"
+          else
+            guided_total=0
+            guided_slds=0
+            guided_annotations=0
+            guided_braces=0
+          fi
+
+          if [ -f "$slds_json" ]; then
+            slds_status="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.status || 'unknown')" "$slds_json")"
+            slds_exit_code="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.exitCode ?? 0)" "$slds_json")"
+          else
+            slds_status="missing_report"
+            slds_exit_code=0
           fi
 
           if [ -f "$formatting_json" ]; then
@@ -796,9 +1404,24 @@ jobs:
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
             operator_decision="NOT SAFE"
             operator_reason="New High/Critical findings appeared after cleanup."
+          elif [ "${new_findings:-0}" -gt 0 ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="New analyzer findings appeared after cleanup."
+          elif [ "${prettier_warnings_after}" -gt "${prettier_warnings_before}" ] || [ "${eslint_problems_after}" -gt "${eslint_problems_before}" ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="A style or lint quality signal regressed after cleanup."
+          elif [ "$INPUT_RUN_DEPLOY_VALIDATE" != "true" ]; then
+            operator_decision="REVIEW REQUIRED"
+            operator_reason="Salesforce deployment validation was not executed."
+          elif [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="Salesforce deployment validation failed."
+          elif [ "$INPUT_RUN_LWC_CONTRACT_VALIDATION" = "true" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "passed" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "skipped_no_lwc" ]; then
+            operator_decision="NOT SAFE"
+            operator_reason="LWC runtime contract validation failed."
           elif [ "${diff_files}" -gt 0 ]; then
             operator_decision="SAFE TO REVIEW"
-            operator_reason="Cleanup patch was generated and is ready for review."
+            operator_reason="Static checks improved and Salesforce deployment validation passed."
           else
             operator_decision="NO CHANGE"
             operator_reason="No cleanup patch was generated."
@@ -811,6 +1434,11 @@ jobs:
             echo "- Prettier warnings: **${prettier_warnings_before} -> ${prettier_warnings_after}**"
             echo "- ESLint problems: **${eslint_problems_before} -> ${eslint_problems_after}**"
             echo "- Analyzer findings: **${total_before:-0} -> ${total_after:-0}**"
+            echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
+            echo "- SLDS auto-fix: **${slds_status}** (exit ${slds_exit_code})"
+            echo "- Analyzer-guided safe fixes: **${guided_total}**"
+            echo "- LWC runtime contract: **${LWC_CONTRACT_STATUS:-not executed}**"
+            echo "- JavaScript cleanup: **var->let ${var_to_let_fixed}**, **unused event params ${unused_event_params_removed}**, **let->const ${let_to_const_fixed}**, **http->https ${insecure_http_fixed}**, **structuredClone ${json_clone_fixed}**, **crypto random ${math_random_fixed}**"
             echo "- New High/Critical: **${new_high_or_critical:-0}**"
             echo "- Patch size: **${diff_files} files**, **${diff_insertions} insertions**, **${diff_deletions} deletions**"
           } > "$classification_md"
@@ -835,10 +1463,18 @@ jobs:
                 patchInsertions: Number(process.argv[14]),
                 patchDeletions: Number(process.argv[15]),
                 trailingWhitespaceLinesFixed: Number(process.argv[16]),
-                finalNewlinesAdded: Number(process.argv[17])
+                finalNewlinesAdded: Number(process.argv[17]),
+                varToLetFixed: Number(process.argv[18]),
+                unusedEventParamsRemoved: Number(process.argv[19]),
+                letToConstFixed: Number(process.argv[20]),
+                insecureHttpFixed: Number(process.argv[21]),
+                jsonCloneFixed: Number(process.argv[22]),
+                mathRandomFixed: Number(process.argv[23]),
+                sldsHardcodedValueFindingsFixed: Number(process.argv[24] || 0),
+                analyzerGuidedFixes: Number(process.argv[25] || 0)
               }
             };
-            fs.writeFileSync(process.argv[18], JSON.stringify(data, null, 2) + '\n');
+            fs.writeFileSync(process.argv[26], JSON.stringify(data, null, 2) + '\n');
           " \
             "${operator_decision}" \
             "${operator_reason}" \
@@ -857,6 +1493,14 @@ jobs:
             "${diff_deletions}" \
             "${trailing_fixed}" \
             "${final_newlines}" \
+            "${var_to_let_fixed}" \
+            "${unused_event_params_removed}" \
+            "${let_to_const_fixed}" \
+            "${insecure_http_fixed}" \
+            "${json_clone_fixed}" \
+            "${math_random_fixed}" \
+            "${slds_fixed_findings:-0}" \
+            "${guided_total}" \
             "$classification_json"
 
           echo "Cleanup result"
@@ -865,8 +1509,11 @@ jobs:
           echo "Prettier warnings: ${prettier_warnings_before} -> ${prettier_warnings_after}"
           echo "ESLint problems: ${eslint_problems_before} -> ${eslint_problems_after}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
+          echo "SLDS hardcoded-value findings fixed: ${slds_fixed_findings:-0}"
+          echo "Analyzer-guided safe fixes: ${guided_total}"
+          echo "JavaScript cleanup: var->let ${var_to_let_fixed}, unused event params ${unused_event_params_removed}, let->const ${let_to_const_fixed}, http->https ${insecure_http_fixed}, structuredClone ${json_clone_fixed}, crypto random ${math_random_fixed}"
           echo "New High/Critical: ${new_high_or_critical:-0}"
-          echo "::notice title=Cleanup result::${operator_decision}. ${operator_reason} Patch: ${diff_files} files. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
+          echo "::notice title=Cleanup result::${operator_decision}. ${operator_reason} Patch: ${diff_files} files. JS: var->let ${var_to_let_fixed}, unused event ${unused_event_params_removed}, let->const ${let_to_const_fixed}, http->https ${insecure_http_fixed}, structuredClone ${json_clone_fixed}, crypto random ${math_random_fixed}. Prettier: ${prettier_warnings_before}->${prettier_warnings_after}. ESLint: ${eslint_problems_before}->${eslint_problems_after}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
 
           {
             echo "## Basic Code Cleanup Result"
@@ -889,22 +1536,35 @@ jobs:
             echo "- Files changed: **${diff_files}**"
             echo "- Trailing whitespace lines fixed: **${trailing_fixed}**"
             echo "- Final newlines added: **${final_newlines}**"
+            echo "- JavaScript var to let fixes: **${var_to_let_fixed}**"
+            echo "- Unused event parameters removed: **${unused_event_params_removed}**"
+            echo "- JavaScript let to const fixes: **${let_to_const_fixed}**"
+            echo "- JavaScript http to https fixes: **${insecure_http_fixed}**"
+            echo "- JavaScript structuredClone fixes: **${json_clone_fixed}**"
+            echo "- JavaScript crypto random fixes: **${math_random_fixed}**"
+            echo "- SLDS hardcoded-value findings fixed: **${slds_fixed_findings:-0}**"
+            echo "- Analyzer-guided safe fixes: **${guided_total}** (SLDS ${guided_slds}, Apex annotations ${guided_annotations}, Apex braces ${guided_braces})"
             if [ "${FIX_BRANCH_PUSHED}" = "true" ]; then
               echo "- Fix branch: \`${FIX_BRANCH_NAME}\`"
               if [ -n "${FIX_PR_URL:-}" ]; then
                 echo "- Pull request: ${FIX_PR_URL}"
               fi
-            elif [ "${{ inputs.enforce_deploy_validation }}" = "true" ] && [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            elif [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ] && [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
               echo "- Fix branch: not created."
               echo "- Reason: deploy validation failed and enforcement is blocking."
             else
               echo "- Fix branch: not created."
               echo "- Reason: ${FIX_BRANCH_REASON:-not applicable}."
             fi
-            if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ]; then
               echo "- Deploy validation: ${DEPLOY_VALIDATION_STATUS:-failed}."
             else
               echo "- Deploy validation: not executed."
+            fi
+            if [ "$INPUT_RUN_LWC_CONTRACT_VALIDATION" = "true" ]; then
+              echo "- LWC runtime contract: ${LWC_CONTRACT_STATUS:-failed}."
+            else
+              echo "- LWC runtime contract: not executed."
             fi
             echo
             append_deploy_validation_summary
@@ -936,12 +1596,17 @@ jobs:
 
       - name: Upload basic cleanup artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: basic-code-cleanup-guard-${{ github.run_number }}
           path: |
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.md
             project/docs/basic-code-cleanup-guard/basic-code-cleanup-report.json
+            project/docs/basic-code-cleanup-guard/analyzer-guided-fixes.md
+            project/docs/basic-code-cleanup-guard/analyzer-guided-fixes.json
+            project/docs/basic-code-cleanup-guard/slds-autofix-report.md
+            project/docs/basic-code-cleanup-guard/slds-autofix-report.json
+            project/docs/basic-code-cleanup-guard/slds-autofix.log
             project/docs/basic-code-cleanup-guard/style-dependencies-report.md
             project/docs/basic-code-cleanup-guard/style-dependencies-report.json
             project/docs/basic-code-cleanup-guard/formatting-report.md
@@ -969,11 +1634,14 @@ jobs:
             project/docs/basic-code-cleanup-guard/comparison-summary.env
             project/docs/basic-code-cleanup-guard/deploy-validation-report.md
             project/docs/basic-code-cleanup-guard/deploy-validation.log
+            project/docs/basic-code-cleanup-guard/lwc-contract-*
+            project/docs/basic-code-cleanup-guard/trust-gate.json
+            project/docs/basic-code-cleanup-guard/trust-gate.md
           if-no-files-found: warn
 
-      - name: Fail if enforced deploy validation failed
-        if: ${{ inputs.enforce_deploy_validation && inputs.run_deploy_validate && steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
+      - name: Enforce automated trust gate
+        if: ${{ always() && steps.trust-gate.outputs.decision == 'BLOCK' }}
         shell: bash
         run: |
-          echo "Deploy validation failed and enforcement is active. Check deploy-validation.log in the uploaded artifact."
+          echo "The automated trust gate blocked this cleanup. Check trust-gate.md in the uploaded artifact."
           exit 1

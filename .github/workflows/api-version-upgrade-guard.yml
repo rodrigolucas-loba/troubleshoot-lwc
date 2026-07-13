@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       target_api_version:
-        description: "Target Salesforce API version, for example 66.0"
+        description: "Use auto for the latest version supported by the validation org, or provide an explicit version"
         required: true
-        default: "66.0"
+        default: "auto"
         type: string
       source_dir:
         description: "Salesforce source directory"
@@ -29,6 +29,11 @@ on:
         required: true
         default: true
         type: boolean
+      draft_pull_request:
+        description: "Create the automated pull request as draft so external quality gates can be reviewed first"
+        required: true
+        default: true
+        type: boolean
       fix_branch_prefix:
         description: "Prefix for the generated fix branch"
         required: true
@@ -42,7 +47,7 @@ on:
       enforce_deploy_validation:
         description: "Fail the workflow and block the fix branch when Salesforce deploy validation fails"
         required: true
-        default: false
+        default: true
         type: boolean
       test_level:
         description: "Salesforce deploy validation test level"
@@ -67,6 +72,14 @@ env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
   REPORT_DIR: "docs/api-version-upgrade-guard"
+  INPUT_TARGET_API_VERSION: ${{ inputs.target_api_version }}
+  INPUT_SOURCE_DIR: ${{ inputs.source_dir }}
+  INPUT_TARGET_REF: ${{ inputs.target_ref }}
+  INPUT_TEST_LEVEL: ${{ inputs.test_level }}
+  INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes }}
+  INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix }}
+  INPUT_RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
+  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ inputs.enforce_deploy_validation }}
 
 jobs:
   api-version-upgrade-guard:
@@ -76,7 +89,7 @@ jobs:
 
     steps:
       - name: Checkout workflow tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           path: tools
@@ -92,7 +105,7 @@ jobs:
 
           git clone \
             --no-recurse-submodules \
-            --branch "${{ inputs.target_ref }}" \
+            --branch "$INPUT_TARGET_REF" \
             --depth 1 \
             "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
             project
@@ -100,9 +113,14 @@ jobs:
           git -C project remote set-url origin "https://github.com/${{ github.repository }}.git"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
+          package-manager-cache: false
+
+      - name: Test API version guard tools
+        working-directory: tools
+        run: npm test
 
       - name: Install Salesforce CLI
         shell: bash
@@ -119,6 +137,39 @@ jobs:
           mkdir -p "${REPORT_DIR}"
           rm -f "${REPORT_DIR}"/*
 
+      - name: Resolve target API version from validation org
+        id: resolve-api
+        shell: bash
+        working-directory: project
+        env:
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SF_AUTH_URL:-}" ]; then
+            echo "SF_AUTH_URL is required to resolve and verify the target API version." >&2
+            exit 1
+          fi
+
+          auth_file="$(mktemp)"
+          trap 'rm -f "$auth_file"' EXIT
+          printf '%s' "$SF_AUTH_URL" > "$auth_file"
+          sf org login sfdx-url \
+            --sfdx-url-file "$auth_file" \
+            --alias validation-org \
+            > "${REPORT_DIR}/api-version-auth.log" 2>&1
+
+          sf api request rest "/services/data/" \
+            --target-org validation-org \
+            > "${REPORT_DIR}/salesforce-supported-api-versions.json"
+
+          node ../tools/scripts/nodejs/resolve-salesforce-api-version.mjs \
+            --requested "$INPUT_TARGET_API_VERSION" \
+            --project "sfdx-project.json" \
+            --versions-json "${REPORT_DIR}/salesforce-supported-api-versions.json" \
+            --json "${REPORT_DIR}/api-version-resolution.json" \
+            --markdown "${REPORT_DIR}/api-version-resolution.md"
+
       - name: Run analyzer before API version update
         id: analyzer-before
         continue-on-error: true
@@ -128,7 +179,7 @@ jobs:
           set +e
           sf code-analyzer run \
             --workspace . \
-            --target "${{ inputs.source_dir }}" \
+            --target "$INPUT_SOURCE_DIR" \
             --rule-selector Recommended \
             --output-file "${REPORT_DIR}/analyzer-before.csv" \
             --view table
@@ -140,10 +191,12 @@ jobs:
         id: api-version-guard
         shell: bash
         working-directory: project
+        env:
+          RESOLVED_TARGET_API_VERSION: ${{ steps.resolve-api.outputs.target_api_version }}
         run: |
           node ../tools/scripts/nodejs/api-version-upgrade-guard.mjs \
-            --target-api "${{ inputs.target_api_version }}" \
-            --source-dir "${{ inputs.source_dir }}" \
+            --target-api "$RESOLVED_TARGET_API_VERSION" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --report "${REPORT_DIR}/api-version-upgrade-report.md" \
             --json "${REPORT_DIR}/api-version-upgrade-report.json"
 
@@ -222,7 +275,7 @@ jobs:
           set +e
           sf code-analyzer run \
             --workspace . \
-            --target "${{ inputs.source_dir }}" \
+            --target "$INPUT_SOURCE_DIR" \
             --rule-selector Recommended \
             --output-file "${REPORT_DIR}/analyzer-after.csv" \
             --view table
@@ -234,14 +287,16 @@ jobs:
         id: compare
         shell: bash
         working-directory: project
+        env:
+          RESOLVED_TARGET_API_VERSION: ${{ steps.resolve-api.outputs.target_api_version }}
         run: |
           node ../tools/scripts/nodejs/compare-api-version-analyzer-results.mjs \
             --before "${REPORT_DIR}/analyzer-before.csv" \
             --after "${REPORT_DIR}/analyzer-after.csv" \
             --out-dir "${REPORT_DIR}" \
-            --target-api "${{ inputs.target_api_version }}" \
-            --target-ref "${{ inputs.target_ref }}" \
-            --source-dir "${{ inputs.source_dir }}" \
+            --target-api "$RESOLVED_TARGET_API_VERSION" \
+            --target-ref "$INPUT_TARGET_REF" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
             --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
 
@@ -293,10 +348,10 @@ jobs:
             } >> "$report_log"
 
             sf project deploy validate \
-              --source-dir "${{ inputs.source_dir }}" \
+              --source-dir "$INPUT_SOURCE_DIR" \
               --target-org validation-org \
-              --test-level "${{ inputs.test_level }}" \
-              --wait "${{ inputs.deploy_wait_minutes }}" >> "$report_log" 2>&1
+              --test-level "$INPUT_TEST_LEVEL" \
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES" >> "$report_log" 2>&1
             validate_code=$?
           fi
           set -e
@@ -311,8 +366,8 @@ jobs:
             echo "# Deploy validation"
             echo
             echo "- Status: ${status}"
-            echo "- Test level: ${{ inputs.test_level }}"
-            echo "- Source dir: ${{ inputs.source_dir }}"
+            echo "- Test level: $INPUT_TEST_LEVEL"
+            echo "- Source dir: $INPUT_SOURCE_DIR"
             echo "- Exit code: ${validate_code}"
           } > "$report_md"
 
@@ -362,7 +417,7 @@ jobs:
             exit 0
           fi
 
-          fix_branch="${{ inputs.fix_branch_prefix }}/run-${{ github.run_id }}-${{ github.run_attempt }}"
+          fix_branch="$INPUT_FIX_BRANCH_PREFIX/run-${{ github.run_id }}-${{ github.run_attempt }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -378,19 +433,41 @@ jobs:
 
       - name: Open API version fix pull request
         id: fix-pr
-        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
-        uses: actions/github-script@v7
+        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        uses: actions/github-script@v8
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           TARGET_REF: ${{ inputs.target_ref }}
-          TARGET_API_VERSION: ${{ inputs.target_api_version }}
+          TARGET_API_VERSION: ${{ steps.resolve-api.outputs.target_api_version }}
           SOURCE_DIR: ${{ inputs.source_dir }}
+          DRAFT_PULL_REQUEST: ${{ inputs.draft_pull_request }}
+          DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
+          DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         with:
           script: |
+            const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const head = process.env.FIX_BRANCH_NAME;
             const base = process.env.TARGET_REF;
+            const summaryPath = 'project/docs/api-version-upgrade-guard/comparison-summary.env';
+            const resolutionPath = 'project/docs/api-version-upgrade-guard/api-version-resolution.json';
+
+            function readEnvFile(filePath) {
+              if (!fs.existsSync(filePath)) return {};
+              return Object.fromEntries(
+                fs.readFileSync(filePath, 'utf8')
+                  .split(/\r?\n/)
+                  .filter(Boolean)
+                  .map((line) => {
+                    const index = line.indexOf('=');
+                    return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
+                  })
+              );
+            }
+
+            const summary = readEnvFile(summaryPath);
+            const resolution = JSON.parse(fs.readFileSync(resolutionPath, 'utf8'));
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -413,6 +490,20 @@ jobs:
               `- Source directory: ${process.env.SOURCE_DIR}`,
               `- Workflow run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
               '',
+              '## Trust Ruleset',
+              '',
+              '| Rule | Status |',
+              '| --- | --- |',
+              `| Fix branch created | PASS |`,
+              `| API version resolution | ${resolution.currentProjectVersion || 'not configured'} -> ${resolution.resolved} (${resolution.resolutionSource}) |`,
+              `| Analyzer new High/Critical findings | ${summary.new_high_or_critical || '0'} |`,
+              `| API version findings | ${summary.api_version_before || '0'} -> ${summary.api_version_after || '0'} |`,
+              `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
+              `| Salesforce deploy validation | ${process.env.DEPLOY_VALIDATION_STATUS || 'not executed'} (${process.env.DEPLOY_VALIDATION_EXIT_CODE || 'unknown'}) |`,
+              `| External PR checks | PENDING |`,
+              '',
+              'Rules: keep this PR as draft until external checks pass and the generated patch has been reviewed.',
+              '',
               'Review the patch and workflow artifacts before merging.'
             ].join('\n');
 
@@ -422,7 +513,8 @@ jobs:
               title: `Apply API version cleanup (${process.env.TARGET_API_VERSION})`,
               head,
               base,
-              body
+              body,
+              draft: process.env.DRAFT_PULL_REQUEST === 'true'
             });
 
             core.setOutput('url', pull.data.html_url);
@@ -439,14 +531,17 @@ jobs:
           FIX_PR_URL: ${{ steps.fix-pr.outputs.url }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
+          RESOLVED_TARGET_API_VERSION: ${{ steps.resolve-api.outputs.target_api_version }}
         run: |
           summary_file="${REPORT_DIR}/comparison-summary.env"
           deploy_log="${REPORT_DIR}/deploy-validation.log"
+          resolution_json="${REPORT_DIR}/api-version-resolution.json"
+          upgrade_json="${REPORT_DIR}/api-version-upgrade-report.json"
 
           append_deploy_validation_summary() {
             echo "### Salesforce Deployment Validation"
             echo
-            if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" != "true" ]; then
               echo "- Status: not executed."
               return
             fi
@@ -458,7 +553,7 @@ jobs:
             else
               echo "- Merge recommendation: **NOT SAFE**"
             fi
-            if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
+            if [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ]; then
               echo "- Enforcement: blocking"
             else
               echo "- Enforcement: advisory"
@@ -496,27 +591,36 @@ jobs:
           . "$summary_file"
           set +a
 
+          current_api_version="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.currentProjectVersion || 'not configured')" "$resolution_json")"
+          resolution_source="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.resolutionSource)" "$resolution_json")"
+          version_files_changed="$(node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); console.log(r.realChangedFiles || 0)" "$upgrade_json")"
+
           if [ "${new_high_or_critical:-0}" -gt 0 ]; then
             decision="NOT SAFE"
             reason="New High/Critical findings appeared after the API version update."
-          elif [ "${api_version_fixed:-0}" -gt 0 ]; then
+          elif [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            decision="NOT SAFE"
+            reason="Salesforce deployment validation failed after the API version update."
+          elif [ "$version_files_changed" -gt 0 ] && [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ]; then
             decision="SAFE TO REVIEW"
-            reason="API version findings decreased in this run."
-          elif [ "${fixed_findings:-0}" -gt 0 ]; then
-            decision="SAFE TO REVIEW"
-            reason="Analyzer findings decreased in this run."
+            reason="API metadata was upgraded and Salesforce deployment validation passed."
+          elif [ "$version_files_changed" -gt 0 ]; then
+            decision="REVIEW REQUIRED"
+            reason="API metadata was upgraded, but Salesforce deployment validation was not executed."
           else
             decision="NO CHANGE"
-            reason="No analyzer reduction was detected in this run."
+            reason="The project already uses the resolved API version."
           fi
 
           echo "API version result"
           echo "Decision: ${decision}"
           echo "Reason: ${reason}"
+          echo "Resolved API version: ${current_api_version} -> ${RESOLVED_TARGET_API_VERSION} (${resolution_source})"
+          echo "Version files changed: ${version_files_changed}"
           echo "API version findings: ${api_version_before:-0} -> ${api_version_after:-0}"
           echo "Analyzer findings: ${total_before:-0} -> ${total_after:-0}"
           echo "New High/Critical: ${new_high_or_critical:-0}"
-          echo "::notice title=API version result::${decision}. ${reason} API version: ${api_version_before:-0}->${api_version_after:-0}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
+          echo "::notice title=API version result::${decision}. ${reason} Resolved version: ${current_api_version}->${RESOLVED_TARGET_API_VERSION}. Files changed: ${version_files_changed}. Analyzer: ${total_before:-0}->${total_after:-0}. New High/Critical: ${new_high_or_critical:-0}."
 
           {
             echo "## API Version Upgrade Result"
@@ -526,6 +630,10 @@ jobs:
             echo "**${decision}**"
             echo
             echo "${reason}"
+            echo
+            echo "- API version: **${current_api_version} -> ${RESOLVED_TARGET_API_VERSION}**"
+            echo "- Resolution source: **${resolution_source}**"
+            echo "- Version files changed: **${version_files_changed}**"
             echo
             echo "| Metric | Before | After |"
             echo "| --- | ---: | ---: |"
@@ -541,14 +649,14 @@ jobs:
               if [ -n "${FIX_PR_URL:-}" ]; then
                 echo "- Pull request: ${FIX_PR_URL}"
               fi
-            elif [ "${{ inputs.enforce_deploy_validation }}" = "true" ] && [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            elif [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ] && [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
               echo "- Fix branch: not created."
               echo "- Reason: deploy validation failed and enforcement is blocking."
             else
               echo "- Fix branch: not created."
               echo "- Reason: ${FIX_BRANCH_REASON:-not applicable}."
             fi
-            if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ]; then
               echo "- Deploy validation: ${DEPLOY_VALIDATION_STATUS:-failed}."
             else
               echo "- Deploy validation: not executed."
@@ -584,12 +692,15 @@ jobs:
 
       - name: Upload API version guard artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: api-version-upgrade-guard-${{ github.run_number }}
           path: |
             project/docs/api-version-upgrade-guard/api-version-upgrade-report.md
             project/docs/api-version-upgrade-guard/api-version-upgrade-report.json
+            project/docs/api-version-upgrade-guard/api-version-resolution.md
+            project/docs/api-version-upgrade-guard/api-version-resolution.json
+            project/docs/api-version-upgrade-guard/salesforce-supported-api-versions.json
             project/docs/api-version-upgrade-guard/api-version-upgrade.patch
             project/docs/api-version-upgrade-guard/api-version-upgrade-full.patch
             project/docs/api-version-upgrade-guard/api-version-upgrade-real.patch
