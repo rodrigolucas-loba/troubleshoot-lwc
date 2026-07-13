@@ -193,6 +193,10 @@ jobs:
         with:
           node-version: 22
 
+      - name: Test cleanup guard tools
+        working-directory: tools
+        run: npm test
+
       - name: Install Salesforce CLI
         shell: bash
         run: npm install --global @salesforce/cli@${SF_CLI_VERSION}

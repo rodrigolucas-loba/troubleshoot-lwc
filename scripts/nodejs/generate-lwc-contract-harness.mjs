@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const HARNESS_BUNDLE = "autofixValidationHarness";
 const HOST_BUNDLE = "autofixValidationHarnessHost";
@@ -121,7 +122,13 @@ async function main() {
   console.log(`Generated LWC contract harness for ${components.length} component(s).`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}
+
+export { componentTag };

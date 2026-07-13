@@ -1,0 +1,8 @@
+{
+  "name": "salesforce-cleanup-guard-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
