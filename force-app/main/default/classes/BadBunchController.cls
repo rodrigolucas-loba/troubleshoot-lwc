@@ -2,19 +2,20 @@
  * Simple controller for the Bad Bunch demo.
  **/
 public with sharing class BadBunchController {
-    
   /**
    * Generates a number of accounts.
    * @returns (Account)
    */
   @AuraEnabled(cacheable=false)
   public static Account[] generateRecords(Integer size) {
-    Account[] results = new Account[]{};
+    Account[] results = new List<Account>{};
 
-    for(Integer i = 0; i < size; i++) {
-      results.add(new Account(
-        name = 'Account_' + i + Integer.valueof((Math.random() * 10))
-      ));
+    for (Integer i = 0; i < size; i++) {
+      results.add(
+        new Account(
+          name = 'Account_' + i + Integer.valueof((Math.random() * 10))
+        )
+      );
     }
 
     return results;
@@ -35,17 +36,18 @@ public with sharing class BadBunchController {
 
   @AuraEnabled(cacheable=false)
   public static List<String> runDescribe() {
-    Map<String, Schema.SObjectType> gd = Schema.getGlobalDescribe(); 
+    Map<String, Schema.SObjectType> gd = Schema.getGlobalDescribe();
     Set<String> objs = new Set<String>();
-    for(Schema.SObjectType d : gd.values()) {
+    for (Schema.SObjectType d : gd.values()) {
       Schema.DescribeSObjectResult ds = d.getDescribe();
-      if(!ds.isCreateable())
-      continue;
+      if (!ds.isCreateable()) {
+        continue;
+      }
       objs.add(ds.getName());
     }
     List<String> sortedNames = new List<String>(objs);
     sortedNames.sort();
-    
+
     return sortedNames;
   }
 }
