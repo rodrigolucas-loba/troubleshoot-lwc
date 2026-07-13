@@ -1100,17 +1100,25 @@ jobs:
           script: |
             const decision = process.env.TRUST_GATE_DECISION;
             const state = decision === 'SAFE_TO_REVIEW' ? 'success' : 'failure';
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: process.env.FIX_COMMIT_SHA,
-              state,
-              context: 'Cleanup Guard / Automated Trust Gate',
-              description: decision === 'SAFE_TO_REVIEW'
-                ? 'Automated cleanup validations passed'
-                : `Cleanup requires review: ${decision}`,
-              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
-            });
+            const description = decision === 'SAFE_TO_REVIEW'
+              ? 'Automated cleanup validations passed'
+              : `Cleanup requires review: ${decision}`;
+            const targetUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            for (const statusContext of [
+              'Cleanup Guard / Automated Trust Gate',
+              'Verify maintenance trust'
+            ]) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: process.env.FIX_COMMIT_SHA,
+                state,
+                context: statusContext,
+                description,
+                target_url: targetUrl
+              });
+            }
 
       - name: Open cleanup fix pull request
         id: fix-pr

@@ -461,17 +461,26 @@ jobs:
               process.env.DEPLOY_VALIDATION_STATUS === 'passed';
             const trusted = newFindings === 0 && newHighOrCritical === 0 && deployPassed;
 
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: process.env.FIX_COMMIT_SHA,
-              state: trusted ? 'success' : 'failure',
-              context: 'API Version Guard / Automated Trust Gate',
-              description: trusted
-                ? 'No regressions detected and Salesforce validation passed'
-                : 'Automated trust requirements were not satisfied',
-              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
-            });
+            const state = trusted ? 'success' : 'failure';
+            const description = trusted
+              ? 'No regressions detected and Salesforce validation passed'
+              : 'Automated trust requirements were not satisfied';
+            const targetUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            for (const statusContext of [
+              'API Version Guard / Automated Trust Gate',
+              'Verify maintenance trust'
+            ]) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: process.env.FIX_COMMIT_SHA,
+                state,
+                context: statusContext,
+                description,
+                target_url: targetUrl
+              });
+            }
 
             if (!trusted) {
               core.setFailed('The generated API version commit did not satisfy the automated trust gate.');
