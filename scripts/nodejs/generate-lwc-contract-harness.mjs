@@ -47,7 +47,7 @@ async function main() {
   }
 
   const components = [];
-  for (const bundle of [...candidates].sort()) {
+  for (const bundle of [...candidates].sort((left, right) => left.localeCompare(right))) {
     const bundleDir = path.join(root, sourceDir, "main", "default", "lwc", bundle);
     if ((await exists(path.join(bundleDir, `${bundle}.js`))) && (await exists(path.join(bundleDir, `${bundle}.html`)))) {
       components.push({ bundle, tag: componentTag(bundle) });

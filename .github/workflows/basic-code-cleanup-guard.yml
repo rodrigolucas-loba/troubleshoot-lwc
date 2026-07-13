@@ -103,6 +103,18 @@ env:
   SLDS_LINTER_VERSION: "1.2.1"
   PLAYWRIGHT_VERSION: "1.60.0"
   REPORT_DIR: "docs/basic-code-cleanup-guard"
+  INPUT_SOURCE_DIR: ${{ inputs.source_dir }}
+  INPUT_TARGET_REF: ${{ inputs.target_ref }}
+  INPUT_CLEANUP_MODE: ${{ inputs.cleanup_mode }}
+  INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix }}
+  INPUT_TEST_LEVEL: ${{ inputs.test_level }}
+  INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes }}
+  INPUT_LWC_CONTRACT_TOLERANCE_PX: ${{ inputs.lwc_contract_tolerance_px }}
+  INPUT_LWC_CONTRACT_WAIT_MS: ${{ inputs.lwc_contract_wait_ms }}
+  INPUT_ALLOW_PRIMARY_AUTH_FOR_LWC_CONTRACT: ${{ inputs.allow_primary_auth_for_lwc_contract }}
+  INPUT_RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
+  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ inputs.enforce_deploy_validation }}
+  INPUT_RUN_LWC_CONTRACT_VALIDATION: ${{ inputs.run_lwc_contract_validation }}
 
 jobs:
   basic-code-cleanup-guard:
@@ -128,10 +140,51 @@ jobs:
 
           git clone \
             --no-recurse-submodules \
-            --branch "${{ inputs.target_ref }}" \
+            --branch "$INPUT_TARGET_REF" \
             --depth 1 \
             "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
             project
+
+      - name: Validate workflow inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$INPUT_SOURCE_DIR" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+             [[ "$INPUT_SOURCE_DIR" = /* ]] ||
+             [[ "$INPUT_SOURCE_DIR" =~ (^|/)\.\.(/|$) ]]; then
+            echo "Invalid source_dir: use a relative path inside the repository." >&2
+            exit 1
+          fi
+
+          if ! git check-ref-format --branch "$INPUT_TARGET_REF" >/dev/null 2>&1; then
+            echo "Invalid target_ref: expected a valid branch or tag name." >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_DEPLOY_WAIT_MINUTES" =~ ^[0-9]+$ ]] ||
+             (( INPUT_DEPLOY_WAIT_MINUTES < 1 || INPUT_DEPLOY_WAIT_MINUTES > 120 )); then
+            echo "Invalid deploy_wait_minutes: expected an integer from 1 to 120." >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_LWC_CONTRACT_WAIT_MS" =~ ^[0-9]+$ ]] ||
+             (( INPUT_LWC_CONTRACT_WAIT_MS < 1000 || INPUT_LWC_CONTRACT_WAIT_MS > 60000 )); then
+            echo "Invalid lwc_contract_wait_ms: expected an integer from 1000 to 60000." >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_LWC_CONTRACT_TOLERANCE_PX" =~ ^[0-9]+$ ]] ||
+             (( INPUT_LWC_CONTRACT_TOLERANCE_PX > 20 )); then
+            echo "Invalid lwc_contract_tolerance_px: expected an integer from 0 to 20." >&2
+            exit 1
+          fi
+
+          candidate_branch="$INPUT_FIX_BRANCH_PREFIX/$INPUT_CLEANUP_MODE/validation"
+          if ! git check-ref-format --branch "$candidate_branch" >/dev/null 2>&1; then
+            echo "Invalid fix_branch_prefix: it does not produce a valid Git branch." >&2
+            exit 1
+          fi
 
           git -C project remote set-url origin "https://github.com/${{ github.repository }}.git"
 
@@ -216,7 +269,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
+          npx prettier --check "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
           prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
@@ -243,7 +296,7 @@ jobs:
           set +e
           sf code-analyzer run \
             --workspace . \
-            --target "${{ inputs.source_dir }}" \
+            --target "$INPUT_SOURCE_DIR" \
             --rule-selector Recommended \
             --output-file "${REPORT_DIR}/analyzer-before.csv" \
             --view table
@@ -266,7 +319,7 @@ jobs:
         working-directory: project
         run: |
           node ../tools/scripts/nodejs/basic-code-cleanup-guard.mjs \
-            --source-dir "${{ inputs.source_dir }}" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --report "${REPORT_DIR}/basic-code-cleanup-report.md" \
             --json "${REPORT_DIR}/basic-code-cleanup-report.json"
 
@@ -278,7 +331,7 @@ jobs:
           report_json="${REPORT_DIR}/slds-autofix-report.json"
           report_log="${REPORT_DIR}/slds-autofix.log"
 
-          if [ "${{ inputs.cleanup_mode }}" != "format_lintfix" ]; then
+          if [ "$INPUT_CLEANUP_MODE" != "format_lintfix" ]; then
             {
               echo "# SLDS Auto-fix"
               echo
@@ -291,7 +344,7 @@ jobs:
 
           set +e
           npx --yes "@salesforce-ux/slds-linter@${SLDS_LINTER_VERSION}" \
-            lint "${{ inputs.source_dir }}" --fix > "$report_log" 2>&1
+            lint "$INPUT_SOURCE_DIR" --fix > "$report_log" 2>&1
           slds_code=$?
           set -e
 
@@ -306,7 +359,7 @@ jobs:
             echo
             echo "- Status: ${status}"
             echo "- Exit code: ${slds_code}"
-            echo "- Source dir: ${{ inputs.source_dir }}"
+            echo "- Source dir: $INPUT_SOURCE_DIR"
           } > "$report_md"
 
           echo "{\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${slds_code}}" > "$report_json"
@@ -319,7 +372,7 @@ jobs:
           report_md="${REPORT_DIR}/formatting-report.md"
           report_json="${REPORT_DIR}/formatting-report.json"
 
-          if [ "${{ inputs.cleanup_mode }}" = "safe" ]; then
+          if [ "$INPUT_CLEANUP_MODE" = "safe" ]; then
             {
               echo "# Formatting Cleanup"
               echo
@@ -337,7 +390,7 @@ jobs:
             {
               echo "# Formatting Cleanup"
               echo
-              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Mode: $INPUT_CLEANUP_MODE"
               echo "- Status: skipped"
               echo
               echo "package.json was not found, so Prettier could not be installed."
@@ -351,7 +404,7 @@ jobs:
             {
               echo "# Formatting Cleanup"
               echo
-              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Mode: $INPUT_CLEANUP_MODE"
               echo "- Status: skipped"
               echo
               echo "Project style dependencies were not installed."
@@ -362,7 +415,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
+          npx prettier --write "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
           prettier_code=$?
 
           if [ "$prettier_code" -eq 0 ]; then
@@ -374,10 +427,10 @@ jobs:
           {
             echo "# Formatting Cleanup"
             echo
-            echo "- Mode: ${{ inputs.cleanup_mode }}"
+            echo "- Mode: $INPUT_CLEANUP_MODE"
             echo "- Status: ${status}"
             echo "- Prettier exit code: ${prettier_code}"
-            echo "- Scope: ${{ inputs.source_dir }}"
+            echo "- Scope: $INPUT_SOURCE_DIR"
           } > "$report_md"
 
           echo "{\"mode\":\"format\",\"enabled\":true,\"status\":\"${status}\",\"exitCode\":${prettier_code}}" > "$report_json"
@@ -392,17 +445,17 @@ jobs:
           report_json="${REPORT_DIR}/eslint-fix-report.json"
           eslint_fix_log="${REPORT_DIR}/eslint-fix.txt"
 
-          if [ "${{ inputs.cleanup_mode }}" != "format_lintfix" ]; then
+          if [ "$INPUT_CLEANUP_MODE" != "format_lintfix" ]; then
             {
               echo "# ESLint Auto-fix"
               echo
-              echo "- Mode: ${{ inputs.cleanup_mode }}"
+              echo "- Mode: $INPUT_CLEANUP_MODE"
               echo "- Status: skipped"
               echo
               echo "ESLint --fix was not requested."
             } > "$report_md"
             echo '{"enabled":false,"status":"skipped","eslintFixExitCode":0,"postFixPrettierExitCode":0}' > "$report_json"
-            echo "ESLint auto-fix skipped. cleanup_mode=${{ inputs.cleanup_mode }}."
+            echo "ESLint auto-fix skipped. cleanup_mode=$INPUT_CLEANUP_MODE."
             exit 0
           fi
 
@@ -424,7 +477,7 @@ jobs:
           npx eslint **/{aura,lwc}/**/*.js --fix > "$eslint_fix_log" 2>&1
           eslint_fix_code=$?
 
-          npx prettier --write "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
+          npx prettier --write "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
           post_fix_prettier_code=$?
 
           if [ "$eslint_fix_code" -eq 0 ]; then
@@ -464,7 +517,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --check "${{ inputs.source_dir }}/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
+          npx prettier --check "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
           prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
@@ -513,7 +566,7 @@ jobs:
           set +e
           sf code-analyzer run \
             --workspace . \
-            --target "${{ inputs.source_dir }}" \
+            --target "$INPUT_SOURCE_DIR" \
             --rule-selector Recommended \
             --output-file "${REPORT_DIR}/analyzer-after.csv" \
             --view table
@@ -529,8 +582,8 @@ jobs:
             --before "${REPORT_DIR}/analyzer-before.csv" \
             --after "${REPORT_DIR}/analyzer-after.csv" \
             --out-dir "${REPORT_DIR}" \
-            --target-ref "${{ inputs.target_ref }}" \
-            --source-dir "${{ inputs.source_dir }}" \
+            --target-ref "$INPUT_TARGET_REF" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --before-exit-code "${{ steps.analyzer-before.outputs.exit_code }}" \
             --after-exit-code "${{ steps.analyzer-after.outputs.exit_code }}"
 
@@ -582,10 +635,10 @@ jobs:
             } >> "$report_log"
 
             sf project deploy validate \
-              --source-dir "${{ inputs.source_dir }}" \
+              --source-dir "$INPUT_SOURCE_DIR" \
               --target-org validation-org \
-              --test-level "${{ inputs.test_level }}" \
-              --wait "${{ inputs.deploy_wait_minutes }}" >> "$report_log" 2>&1
+              --test-level "$INPUT_TEST_LEVEL" \
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES" >> "$report_log" 2>&1
             validate_code=$?
           fi
           set -e
@@ -600,8 +653,8 @@ jobs:
             echo "# Deploy validation"
             echo
             echo "- Status: ${status}"
-            echo "- Test level: ${{ inputs.test_level }}"
-            echo "- Source dir: ${{ inputs.source_dir }}"
+            echo "- Test level: $INPUT_TEST_LEVEL"
+            echo "- Source dir: $INPUT_SOURCE_DIR"
             echo "- Exit code: ${validate_code}"
           } > "$report_md"
 
@@ -636,10 +689,10 @@ jobs:
               (
                 cd "$baseline_dir"
                 sf project deploy start \
-                  --source-dir "${{ inputs.source_dir }}" \
+                  --source-dir "$INPUT_SOURCE_DIR" \
                   --target-org visual-validation-org \
                   --test-level NoTestRun \
-                  --wait "${{ inputs.deploy_wait_minutes }}"
+                  --wait "$INPUT_DEPLOY_WAIT_MINUTES"
               ) > "${report_dir}/lwc-contract-restore.log" 2>&1
               (
                 cd "$baseline_dir"
@@ -648,14 +701,14 @@ jobs:
                   --metadata "AuraDefinitionBundle:autofixValidationHarnessHost" \
                   --target-org visual-validation-org \
                   --test-level NoTestRun \
-                  --wait "${{ inputs.deploy_wait_minutes }}" \
+                  --wait "$INPUT_DEPLOY_WAIT_MINUTES" \
                   --no-prompt
               ) > "${report_dir}/lwc-contract-harness-cleanup.log" 2>&1 || true
             fi
             rm -f "$auth_file" "${report_dir}/lwc-contract-url.json"
             rm -rf \
-              "project/${{ inputs.source_dir }}/main/default/lwc/autofixValidationHarness" \
-              "project/${{ inputs.source_dir }}/main/default/aura/autofixValidationHarnessHost" \
+              "project/$INPUT_SOURCE_DIR/main/default/lwc/autofixValidationHarness" \
+              "project/$INPUT_SOURCE_DIR/main/default/aura/autofixValidationHarnessHost" \
               "$baseline_dir"
           }
           trap finish EXIT
@@ -674,7 +727,7 @@ jobs:
           }
 
           selected_auth_url="${SF_VISUAL_AUTH_URL:-}"
-          if [ -z "$selected_auth_url" ] && [ "${{ inputs.allow_primary_auth_for_lwc_contract }}" = "true" ]; then
+          if [ -z "$selected_auth_url" ] && [ "$INPUT_ALLOW_PRIMARY_AUTH_FOR_LWC_CONTRACT" = "true" ]; then
             selected_auth_url="${SF_PRIMARY_AUTH_URL:-}"
           fi
           if [ -z "$selected_auth_url" ]; then
@@ -682,7 +735,8 @@ jobs:
             exit 0
           fi
 
-          if ! grep -Eq "^${{ inputs.source_dir }}/main/default/lwc/[^/]+/" "$changed_files"; then
+          lwc_prefix="$INPUT_SOURCE_DIR/main/default/lwc/"
+          if ! awk -v prefix="$lwc_prefix" 'index($0, prefix) == 1 { found=1; exit } END { exit !found }' "$changed_files"; then
             echo '{"status":"skipped_no_lwc","componentsChecked":0}' > "$report_json"
             {
               echo "# LWC contract validation"
@@ -702,7 +756,7 @@ jobs:
 
           if ! node tools/scripts/nodejs/generate-lwc-contract-harness.mjs \
             --project-root "$baseline_dir" \
-            --source-dir "${{ inputs.source_dir }}" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --changed-files "$changed_files" \
             --manifest "${report_dir}/lwc-contract-manifest.json"; then
             write_failure "Baseline LWC harness generation failed"
@@ -710,7 +764,7 @@ jobs:
           fi
           if ! node tools/scripts/nodejs/generate-lwc-contract-harness.mjs \
             --project-root project \
-            --source-dir "${{ inputs.source_dir }}" \
+            --source-dir "$INPUT_SOURCE_DIR" \
             --changed-files "$changed_files" \
             --manifest "${report_dir}/lwc-contract-manifest.json"; then
             write_failure "Candidate LWC harness generation failed"
@@ -748,10 +802,10 @@ jobs:
           if ! (
             cd "$baseline_dir"
             sf project deploy start \
-              --source-dir "${{ inputs.source_dir }}" \
+              --source-dir "$INPUT_SOURCE_DIR" \
               --target-org visual-validation-org \
               --test-level NoTestRun \
-              --wait "${{ inputs.deploy_wait_minutes }}"
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES"
           ) > "${report_dir}/lwc-contract-baseline-deploy.log" 2>&1; then
             write_failure "Baseline deployment failed"
             exit 0
@@ -768,7 +822,7 @@ jobs:
             --url-json "${report_dir}/lwc-contract-url.json" \
             --manifest "${report_dir}/lwc-contract-manifest.json" \
             --output "${report_dir}/lwc-contract-baseline.json" \
-            --wait-ms "${{ inputs.lwc_contract_wait_ms }}" \
+            --wait-ms "$INPUT_LWC_CONTRACT_WAIT_MS" \
             >> "${report_dir}/lwc-contract-browser.log" 2>&1; then
             write_failure "Baseline LWC contract capture failed"
             exit 0
@@ -777,10 +831,10 @@ jobs:
           if ! (
             cd project
             sf project deploy start \
-              --source-dir "${{ inputs.source_dir }}" \
+              --source-dir "$INPUT_SOURCE_DIR" \
               --target-org visual-validation-org \
               --test-level NoTestRun \
-              --wait "${{ inputs.deploy_wait_minutes }}"
+              --wait "$INPUT_DEPLOY_WAIT_MINUTES"
           ) > "${report_dir}/lwc-contract-candidate-deploy.log" 2>&1; then
             write_failure "Candidate deployment failed"
             exit 0
@@ -795,7 +849,7 @@ jobs:
             --url-json "${report_dir}/lwc-contract-url.json" \
             --manifest "${report_dir}/lwc-contract-manifest.json" \
             --output "${report_dir}/lwc-contract-candidate.json" \
-            --wait-ms "${{ inputs.lwc_contract_wait_ms }}" \
+            --wait-ms "$INPUT_LWC_CONTRACT_WAIT_MS" \
             >> "${report_dir}/lwc-contract-browser.log" 2>&1; then
             write_failure "Candidate LWC contract capture failed"
             exit 0
@@ -807,7 +861,7 @@ jobs:
             --candidate "${report_dir}/lwc-contract-candidate.json" \
             --json "$report_json" \
             --markdown "$report_md" \
-            --tolerance-px "${{ inputs.lwc_contract_tolerance_px }}"
+            --tolerance-px "$INPUT_LWC_CONTRACT_TOLERANCE_PX"
           compare_code=$?
           set -e
 
@@ -897,8 +951,8 @@ jobs:
             exit 0
           fi
 
-          safe_mode="$(printf '%s' "${{ inputs.cleanup_mode }}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
-          fix_branch="${{ inputs.fix_branch_prefix }}/${safe_mode}/run-${{ github.run_id }}-${{ github.run_attempt }}"
+          safe_mode="$(printf '%s' "$INPUT_CLEANUP_MODE" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
+          fix_branch="$INPUT_FIX_BRANCH_PREFIX/${safe_mode}/run-${{ github.run_id }}-${{ github.run_attempt }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -1053,7 +1107,7 @@ jobs:
           append_deploy_validation_summary() {
             echo "### Salesforce Deployment Validation"
             echo
-            if [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" != "true" ]; then
               echo "- Status: not executed."
               return
             fi
@@ -1065,7 +1119,7 @@ jobs:
             else
               echo "- Merge recommendation: **NOT SAFE**"
             fi
-            if [ "${{ inputs.enforce_deploy_validation }}" = "true" ]; then
+            if [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ]; then
               echo "- Enforcement: blocking"
             else
               echo "- Enforcement: advisory"
@@ -1208,13 +1262,13 @@ jobs:
           elif [ "${prettier_warnings_after}" -gt "${prettier_warnings_before}" ] || [ "${eslint_problems_after}" -gt "${eslint_problems_before}" ]; then
             operator_decision="NOT SAFE"
             operator_reason="A style or lint quality signal regressed after cleanup."
-          elif [ "${{ inputs.run_deploy_validate }}" != "true" ]; then
+          elif [ "$INPUT_RUN_DEPLOY_VALIDATE" != "true" ]; then
             operator_decision="REVIEW REQUIRED"
             operator_reason="Salesforce deployment validation was not executed."
           elif [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
             operator_decision="NOT SAFE"
             operator_reason="Salesforce deployment validation failed."
-          elif [ "${{ inputs.run_lwc_contract_validation }}" = "true" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "passed" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "skipped_no_lwc" ]; then
+          elif [ "$INPUT_RUN_LWC_CONTRACT_VALIDATION" = "true" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "passed" ] && [ "${LWC_CONTRACT_STATUS:-failed}" != "skipped_no_lwc" ]; then
             operator_decision="NOT SAFE"
             operator_reason="LWC runtime contract validation failed."
           elif [ "${diff_files}" -gt 0 ]; then
@@ -1347,19 +1401,19 @@ jobs:
               if [ -n "${FIX_PR_URL:-}" ]; then
                 echo "- Pull request: ${FIX_PR_URL}"
               fi
-            elif [ "${{ inputs.enforce_deploy_validation }}" = "true" ] && [ "${{ inputs.run_deploy_validate }}" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
+            elif [ "$INPUT_ENFORCE_DEPLOY_VALIDATION" = "true" ] && [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ] && [ "${DEPLOY_VALIDATION_STATUS:-failed}" != "passed" ]; then
               echo "- Fix branch: not created."
               echo "- Reason: deploy validation failed and enforcement is blocking."
             else
               echo "- Fix branch: not created."
               echo "- Reason: ${FIX_BRANCH_REASON:-not applicable}."
             fi
-            if [ "${{ inputs.run_deploy_validate }}" = "true" ]; then
+            if [ "$INPUT_RUN_DEPLOY_VALIDATE" = "true" ]; then
               echo "- Deploy validation: ${DEPLOY_VALIDATION_STATUS:-failed}."
             else
               echo "- Deploy validation: not executed."
             fi
-            if [ "${{ inputs.run_lwc_contract_validation }}" = "true" ]; then
+            if [ "$INPUT_RUN_LWC_CONTRACT_VALIDATION" = "true" ]; then
               echo "- LWC runtime contract: ${LWC_CONTRACT_STATUS:-failed}."
             else
               echo "- LWC runtime contract: not executed."
