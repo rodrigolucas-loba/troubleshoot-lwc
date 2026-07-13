@@ -880,9 +880,31 @@ jobs:
           echo "reason=${reason}" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Evaluate automated trust gate
+        id: trust-gate
+        shell: bash
+        env:
+          ANALYZER_AFTER_EXIT_CODE: ${{ steps.analyzer-after.outputs.exit_code }}
+          DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
+          LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
+          INPUT_ENFORCE_LWC_CONTRACT_VALIDATION: ${{ inputs.enforce_lwc_contract_validation }}
+        run: |
+          node tools/scripts/nodejs/evaluate-cleanup-trust-gate.mjs \
+            --report-dir "project/$REPORT_DIR" \
+            --source-dir "$INPUT_SOURCE_DIR" \
+            --analyzer-after-exit-code "$ANALYZER_AFTER_EXIT_CODE" \
+            --deploy-requested "$INPUT_RUN_DEPLOY_VALIDATE" \
+            --deploy-enforced "$INPUT_ENFORCE_DEPLOY_VALIDATION" \
+            --deploy-status "${DEPLOY_VALIDATION_STATUS:-not_executed}" \
+            --lwc-requested "$INPUT_RUN_LWC_CONTRACT_VALIDATION" \
+            --lwc-enforced "$INPUT_ENFORCE_LWC_CONTRACT_VALIDATION" \
+            --lwc-status "${LWC_CONTRACT_STATUS:-not_executed}" \
+            --json "project/$REPORT_DIR/trust-gate.json" \
+            --markdown "project/$REPORT_DIR/trust-gate.md"
+
       - name: Push cleanup fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch && (!inputs.enforce_deploy_validation || !inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') && (!inputs.enforce_lwc_contract_validation || !inputs.run_lwc_contract_validation || steps.lwc-contract.outputs.status == 'passed' || steps.lwc-contract.outputs.status == 'skipped_no_lwc') }}
+        if: ${{ inputs.create_fix_branch && steps.trust-gate.outputs.allow_fix_branch == 'true' }}
         shell: bash
         working-directory: project
         env:
@@ -972,7 +994,7 @@ jobs:
 
       - name: Open cleanup fix pull request
         id: fix-pr
-        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') && (!inputs.run_lwc_contract_validation || steps.lwc-contract.outputs.status == 'passed' || steps.lwc-contract.outputs.status == 'skipped_no_lwc') }}
+        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
         uses: actions/github-script@v7
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
@@ -984,6 +1006,7 @@ jobs:
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
           LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
           LWC_CONTRACT_REASON: ${{ steps.lwc-contract.outputs.reason }}
+          TRUST_GATE_DECISION: ${{ steps.trust-gate.outputs.decision }}
         with:
           script: |
             const fs = require('fs');
@@ -1050,6 +1073,7 @@ jobs:
               '',
               '| Rule | Status |',
               '| --- | --- |',
+              `| Automated trust gate | ${process.env.TRUST_GATE_DECISION || 'REVIEW'} |`,
               `| Fix branch created | PASS |`,
               `| Analyzer new High/Critical findings | ${summary.new_high_or_critical || '0'} |`,
               `| Analyzer total findings | ${summary.total_before || '0'} -> ${summary.total_after || '0'} |`,
@@ -1491,18 +1515,13 @@ jobs:
             project/docs/basic-code-cleanup-guard/deploy-validation-report.md
             project/docs/basic-code-cleanup-guard/deploy-validation.log
             project/docs/basic-code-cleanup-guard/lwc-contract-*
+            project/docs/basic-code-cleanup-guard/trust-gate.json
+            project/docs/basic-code-cleanup-guard/trust-gate.md
           if-no-files-found: warn
 
-      - name: Fail if enforced deploy validation failed
-        if: ${{ inputs.enforce_deploy_validation && inputs.run_deploy_validate && steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
+      - name: Enforce automated trust gate
+        if: ${{ always() && steps.trust-gate.outputs.decision == 'BLOCK' }}
         shell: bash
         run: |
-          echo "Deploy validation failed and enforcement is active. Check deploy-validation.log in the uploaded artifact."
-          exit 1
-
-      - name: Fail if enforced LWC contract validation failed
-        if: ${{ inputs.enforce_lwc_contract_validation && inputs.run_lwc_contract_validation && steps.lwc-contract.outputs.status != 'passed' && steps.lwc-contract.outputs.status != 'skipped_no_lwc' }}
-        shell: bash
-        run: |
-          echo "LWC runtime contract validation failed and enforcement is active. Check the uploaded contract reports."
+          echo "The automated trust gate blocked this cleanup. Check trust-gate.md in the uploaded artifact."
           exit 1
