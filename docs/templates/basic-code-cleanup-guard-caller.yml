@@ -1,0 +1,44 @@
+name: Basic Code Cleanup Guard
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: "Branch to clean"
+        required: true
+        default: "main"
+        type: string
+      cleanup_mode:
+        description: "Cleanup level"
+        required: true
+        default: "format_lintfix"
+        type: choice
+        options:
+          - safe
+          - format
+          - format_lintfix
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    uses: <company-org>/<automation-repository>/.github/workflows/basic-code-cleanup-guard.yml@v1
+    with:
+      target_ref: ${{ inputs.target_ref }}
+      cleanup_mode: ${{ inputs.cleanup_mode }}
+      source_dir: "force-app"
+      create_fix_branch: true
+      create_pull_request: true
+      draft_pull_request: true
+      run_deploy_validate: true
+      enforce_deploy_validation: true
+      run_lwc_contract_validation: true
+      enforce_lwc_contract_validation: true
+      tools_repository: <company-org>/<automation-repository>
+      tools_ref: v1
+    secrets:
+      SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+      SF_VISUAL_AUTH_URL: ${{ secrets.SF_VISUAL_AUTH_URL }}
+      TOOLS_REPOSITORY_TOKEN: ${{ secrets.TOOLS_REPOSITORY_TOKEN }}

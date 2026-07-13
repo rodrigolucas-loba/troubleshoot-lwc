@@ -92,6 +92,98 @@ on:
         required: true
         default: "8000"
         type: string
+      tools_repository:
+        description: "Optional repository containing the cleanup guard scripts"
+        required: false
+        default: ""
+        type: string
+      tools_ref:
+        description: "Optional commit SHA or tag for the cleanup guard scripts"
+        required: false
+        default: ""
+        type: string
+
+  workflow_call:
+    inputs:
+      source_dir:
+        required: false
+        default: "force-app"
+        type: string
+      target_ref:
+        required: false
+        default: "main"
+        type: string
+      cleanup_mode:
+        required: false
+        default: "safe"
+        type: string
+      create_fix_branch:
+        required: false
+        default: true
+        type: boolean
+      create_pull_request:
+        required: false
+        default: true
+        type: boolean
+      draft_pull_request:
+        required: false
+        default: true
+        type: boolean
+      fix_branch_prefix:
+        required: false
+        default: "auto/cleanup"
+        type: string
+      run_deploy_validate:
+        required: false
+        default: true
+        type: boolean
+      enforce_deploy_validation:
+        required: false
+        default: true
+        type: boolean
+      test_level:
+        required: false
+        default: "RunRelevantTests"
+        type: string
+      deploy_wait_minutes:
+        required: false
+        default: "30"
+        type: string
+      run_lwc_contract_validation:
+        required: false
+        default: false
+        type: boolean
+      enforce_lwc_contract_validation:
+        required: false
+        default: true
+        type: boolean
+      allow_primary_auth_for_lwc_contract:
+        required: false
+        default: false
+        type: boolean
+      lwc_contract_tolerance_px:
+        required: false
+        default: "1"
+        type: string
+      lwc_contract_wait_ms:
+        required: false
+        default: "8000"
+        type: string
+      tools_repository:
+        required: false
+        default: ""
+        type: string
+      tools_ref:
+        required: false
+        default: ""
+        type: string
+    secrets:
+      SF_AUTH_URL:
+        required: false
+      SF_VISUAL_AUTH_URL:
+        required: false
+      TOOLS_REPOSITORY_TOKEN:
+        required: false
 
 permissions:
   contents: write
@@ -126,6 +218,9 @@ jobs:
       - name: Checkout workflow tools
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.tools_repository || job.workflow_repository }}
+          ref: ${{ inputs.tools_ref || job.workflow_sha }}
+          token: ${{ secrets.TOOLS_REPOSITORY_TOKEN || github.token }}
           fetch-depth: 0
           path: tools
           submodules: false
