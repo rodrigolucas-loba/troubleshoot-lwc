@@ -1,9 +1,7 @@
-@isTest
+@IsTest
 public with sharing class Test_BadBunchController {
-
-  @isTest 
+  @IsTest
   static void testGenerateJSONRecords() {
-
     Test.startTest();
     String records = BadBunchController.generateJSONRecords(2);
     Test.stopTest();

@@ -1,5 +1,6 @@
 .list {
-  border: 1px solid #ddd;
+  border: var(--slds-g-sizing-border-1, 1px) solid
+    var(--slds-g-color-border-1, #ddd);
   height: 80vh;
   list-style: none;
   margin: auto;
@@ -14,7 +15,7 @@
 }
 
 .list li span {
-  padding: 0 40px;
+  padding: 0 var(--slds-g-spacing-7, 40px);
 }
 
 /*
