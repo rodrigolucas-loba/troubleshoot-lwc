@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
   extractVersions,
   normalizeVersion,
+  resolveApiVersion,
   resolveVersion,
 } from "../../scripts/nodejs/resolve-salesforce-api-version.mjs";
 
@@ -35,4 +39,24 @@ test("manual versions must be supported by the validation org", () => {
 test("API versions use Salesforce major-dot-zero format", () => {
   assert.equal(normalizeVersion("66.0"), "66.0");
   assert.throws(() => normalizeVersion("66"), /Invalid Salesforce API version/);
+});
+
+test("resolution supports repositories without sfdx-project.json", async () => {
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "api-version-resolution-"));
+  const versionsPath = path.join(temporaryDirectory, "versions.json");
+
+  try {
+    await fs.writeFile(versionsPath, JSON.stringify(response), "utf8");
+    const result = await resolveApiVersion({
+      requested: "auto",
+      project: path.join(temporaryDirectory, "sfdx-project.json"),
+      versionsJson: versionsPath,
+    });
+
+    assert.equal(result.resolved, "67.0");
+    assert.equal(result.projectFileFound, false);
+    assert.equal(result.currentProjectVersion, null);
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
 });
