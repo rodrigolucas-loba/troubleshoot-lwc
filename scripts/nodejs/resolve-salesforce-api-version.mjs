@@ -45,9 +45,18 @@ function resolveVersion(requested, availableVersions) {
   return { version: explicit, source: "manual_verified_against_org" };
 }
 
+async function readProject(projectPath) {
+  try {
+    return JSON.parse(await fs.readFile(projectPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function resolveApiVersion(args) {
   const projectPath = path.resolve(args.project || "sfdx-project.json");
-  const project = JSON.parse(await fs.readFile(projectPath, "utf8"));
+  const project = await readProject(projectPath);
   const versionsPayload = JSON.parse(await fs.readFile(path.resolve(args.versionsJson), "utf8"));
   const availableVersions = extractVersions(versionsPayload);
   const resolved = resolveVersion(args.requested, availableVersions);
@@ -56,14 +65,15 @@ async function resolveApiVersion(args) {
     requested: args.requested || "auto",
     resolved: resolved.version,
     resolutionSource: resolved.source,
-    currentProjectVersion: project.sourceApiVersion || null,
+    projectFileFound: project !== null,
+    currentProjectVersion: project?.sourceApiVersion || null,
     highestOrgVersion: availableVersions.at(-1),
     supportedVersionCount: availableVersions.length,
   };
 }
 
 function toMarkdown(result) {
-  return `# Salesforce API version resolution\n\n- Requested: **${result.requested}**\n- Resolved: **${result.resolved}**\n- Source: **${result.resolutionSource}**\n- Current project version: **${result.currentProjectVersion || "not configured"}**\n- Highest version supported by validation org: **${result.highestOrgVersion}**\n`;
+  return `# Salesforce API version resolution\n\n- Requested: **${result.requested}**\n- Resolved: **${result.resolved}**\n- Source: **${result.resolutionSource}**\n- Project file: **${result.projectFileFound ? "found" : "temporary project required"}**\n- Current project version: **${result.currentProjectVersion || "not configured"}**\n- Highest version supported by validation org: **${result.highestOrgVersion}**\n`;
 }
 
 async function main() {
