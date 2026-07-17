@@ -116,6 +116,9 @@ env:
   SF_CODE_ANALYZER_VERSION: "5.13.0"
   SLDS_LINTER_VERSION: "1.2.1"
   PLAYWRIGHT_VERSION: "1.60.0"
+  PRETTIER_VERSION: "3.5.3"
+  PRETTIER_APEX_VERSION: "2.2.6"
+  PRETTIER_XML_VERSION: "3.4.1"
   REPORT_DIR: "docs/basic-code-cleanup-guard"
   INPUT_SOURCE_DIR: ${{ inputs.source_dir || vars.SF_SOURCE_DIR || 'force-app' }}
   INPUT_TARGET_REF: ${{ inputs.target_ref }}
@@ -233,6 +236,15 @@ jobs:
         run: |
           mkdir -p "${REPORT_DIR}"
           rm -f "${REPORT_DIR}"/*
+          cat > "${REPORT_DIR}/cleanup-prettier.config.mjs" <<'EOF'
+          export default {
+            plugins: ["prettier-plugin-apex", "@prettier/plugin-xml"],
+            overrides: [
+              { files: "**/lwc/**/*.html", options: { parser: "lwc" } },
+              { files: "*.{cmp,page,component}", options: { parser: "html" } }
+            ]
+          };
+          EOF
 
       - name: Install project style dependencies
         id: project-deps
@@ -257,7 +269,18 @@ jobs:
 
           set +e
           npm install --no-save --no-package-lock
-          install_code=$?
+          project_install_code=$?
+          npm install --no-save --no-package-lock \
+            "prettier@${PRETTIER_VERSION}" \
+            "prettier-plugin-apex@${PRETTIER_APEX_VERSION}" \
+            "@prettier/plugin-xml@${PRETTIER_XML_VERSION}"
+          formatter_install_code=$?
+
+          if [ "$project_install_code" -eq 0 ] && [ "$formatter_install_code" -eq 0 ]; then
+            install_code=0
+          else
+            install_code=1
+          fi
 
           if [ "$install_code" -eq 0 ]; then
             status="completed"
@@ -295,7 +318,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --check --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
+          npx prettier --config "${REPORT_DIR}/cleanup-prettier.config.mjs" --check --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
           prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
@@ -441,7 +464,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --write --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
+          npx prettier --config "${REPORT_DIR}/cleanup-prettier.config.mjs" --write --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}"
           prettier_code=$?
 
           if [ "$prettier_code" -eq 0 ]; then
@@ -503,7 +526,7 @@ jobs:
           npx eslint **/{aura,lwc}/**/*.js --fix > "$eslint_fix_log" 2>&1
           eslint_fix_code=$?
 
-          npx prettier --write --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
+          npx prettier --config "${REPORT_DIR}/cleanup-prettier.config.mjs" --write --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" >> "$eslint_fix_log" 2>&1
           post_fix_prettier_code=$?
 
           if [ "$eslint_fix_code" -eq 0 ]; then
@@ -543,7 +566,7 @@ jobs:
           fi
 
           set +e
-          npx prettier --check --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
+          npx prettier --config "${REPORT_DIR}/cleanup-prettier.config.mjs" --check --ignore-unknown "$INPUT_SOURCE_DIR/**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}" > "$prettier_log" 2>&1
           prettier_code=$?
           prettier_warnings=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$prettier_log" | grep -c '^\[warn\]' || true)
 
