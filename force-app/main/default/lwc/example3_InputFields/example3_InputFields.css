@@ -1,5 +1,5 @@
 .input-wrapper {
-  padding: 40px 0;
+  padding: var(--slds-g-spacing-7, 40px) 0;
 }
 
 label {
@@ -17,7 +17,7 @@ label span {
 .characters {
   padding-left: 20px;
   font-size: 0.7em;
-  color: #666;
+  color: var(--slds-g-color-on-surface-1, #666);
 }
 
 .thrashy {
@@ -78,7 +78,7 @@ label span {
 
 .thrashy :nth-child(1) * {
   width: 430px;
-  height: 2px;
+  height: var(--slds-g-sizing-border-2, 2px);
 }
 
 .thrashy :nth-child(1) :nth-child(3) {
@@ -98,7 +98,7 @@ label span {
 
 .thrashy :nth-child(1) * {
   width: 919px;
-  height: 24px;
+  height: var(--slds-g-sizing-7, 24px);
 }
 
 .thrashy :nth-child(1) :nth-child(4) {
@@ -163,7 +163,7 @@ label span {
 
 .thrashy :nth-child(1) :nth-child(7) {
   width: 138px;
-  height: 64px;
+  height: var(--slds-g-sizing-11, 64px);
 }
 
 .thrashy :nth-child(1) :nth-child(7) * {
@@ -218,7 +218,7 @@ label span {
 
 .thrashy :nth-child(1) * {
   width: 663px;
-  height: 160px;
+  height: var(--slds-g-sizing-13, 160px);
 }
 
 .thrashy :nth-child(1) :nth-child(10) {
@@ -288,7 +288,7 @@ label span {
 
 .thrashy :nth-child(2) :nth-child(3) * {
   width: 89px;
-  height: 16px;
+  height: var(--slds-g-sizing-base, 16px);
 }
 
 .thrashy :nth-child(2) {
@@ -338,7 +338,7 @@ label span {
 
 .thrashy :nth-child(2) * {
   width: 482px;
-  height: 28px;
+  height: var(--slds-g-sizing-8, 28px);
 }
 
 .thrashy :nth-child(2) :nth-child(6) {
@@ -388,7 +388,7 @@ label span {
 
 .thrashy :nth-child(2) :nth-child(8) * {
   width: 115px;
-  height: 16px;
+  height: var(--slds-g-sizing-base, 16px);
 }
 
 .thrashy :nth-child(2) {
@@ -408,12 +408,12 @@ label span {
 
 .thrashy :nth-child(2) :nth-child(9) * {
   width: 760px;
-  height: 28px;
+  height: var(--slds-g-sizing-8, 28px);
 }
 
 .thrashy :nth-child(2) {
   width: 662px;
-  height: 160px;
+  height: var(--slds-g-sizing-13, 160px);
 }
 
 .thrashy :nth-child(2) * {
@@ -448,7 +448,7 @@ label span {
 
 .thrashy :nth-child(3) :nth-child(1) * {
   width: 374px;
-  height: 8px;
+  height: var(--slds-g-sizing-3, 8px);
 }
 
 .thrashy :nth-child(3) {
@@ -462,17 +462,17 @@ label span {
 }
 
 .thrashy :nth-child(3) :nth-child(2) {
-  width: 20px;
-  height: 8px;
+  width: var(--slds-g-sizing-6, 20px);
+  height: var(--slds-g-sizing-3, 8px);
 }
 
 .thrashy :nth-child(3) :nth-child(2) * {
-  width: 160px;
+  width: var(--slds-g-sizing-13, 160px);
   height: 62px;
 }
 
 .thrashy :nth-child(3) {
-  width: 1px;
+  width: var(--slds-g-sizing-border-1, 1px);
   height: 104px;
 }
 
@@ -623,7 +623,7 @@ label span {
 
 .thrashy :nth-child(3) :nth-child(10) {
   width: 720px;
-  height: 20px;
+  height: var(--slds-g-sizing-6, 20px);
 }
 
 .thrashy :nth-child(3) :nth-child(10) * {
@@ -648,7 +648,7 @@ label span {
 
 .thrashy :nth-child(4) :nth-child(1) * {
   width: 906px;
-  height: 1px;
+  height: var(--slds-g-sizing-border-1, 1px);
 }
 
 .thrashy :nth-child(4) {
@@ -668,7 +668,7 @@ label span {
 
 .thrashy :nth-child(4) :nth-child(2) * {
   width: 720px;
-  height: 28px;
+  height: var(--slds-g-sizing-8, 28px);
 }
 
 .thrashy :nth-child(4) {
@@ -713,7 +713,7 @@ label span {
 
 .thrashy :nth-child(4) {
   width: 666px;
-  height: 28px;
+  height: var(--slds-g-sizing-8, 28px);
 }
 
 .thrashy :nth-child(4) * {
@@ -723,12 +723,12 @@ label span {
 
 .thrashy :nth-child(4) :nth-child(5) {
   width: 986px;
-  height: 1px;
+  height: var(--slds-g-sizing-border-1, 1px);
 }
 
 .thrashy :nth-child(4) :nth-child(5) * {
   width: 490px;
-  height: 1px;
+  height: var(--slds-g-sizing-border-1, 1px);
 }
 
 .thrashy :nth-child(4) {
@@ -748,7 +748,7 @@ label span {
 
 .thrashy :nth-child(4) :nth-child(6) * {
   width: 662px;
-  height: 3px;
+  height: var(--slds-g-sizing-border-3, 3px);
 }
 
 .thrashy :nth-child(4) {
@@ -808,7 +808,7 @@ label span {
 
 .thrashy :nth-child(4) :nth-child(9) * {
   width: 253px;
-  height: 16px;
+  height: var(--slds-g-sizing-base, 16px);
 }
 
 .thrashy :nth-child(4) {
@@ -823,7 +823,7 @@ label span {
 
 .thrashy :nth-child(4) :nth-child(10) {
   width: 140px;
-  height: 3px;
+  height: var(--slds-g-sizing-border-3, 3px);
 }
 
 .thrashy :nth-child(4) :nth-child(10) * {
