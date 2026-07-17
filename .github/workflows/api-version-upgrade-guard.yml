@@ -1,67 +1,13 @@
 name: API Version Upgrade Guard
-run-name: "API version guard (${{ inputs.target_api_version }})"
+run-name: "API version guard (auto) on ${{ inputs.target_ref }}"
 
 on:
   workflow_dispatch:
     inputs:
-      target_api_version:
-        description: "Use auto for the latest version supported by the validation org, or provide an explicit version"
-        required: true
-        default: "auto"
-        type: string
-      source_dir:
-        description: "Salesforce source directory"
-        required: true
-        default: "force-app"
-        type: string
       target_ref:
-        description: "Branch or ref containing the Salesforce project to test"
+        description: "Branch or ref to upgrade"
         required: true
         default: "main"
-        type: string
-      create_fix_branch:
-        description: "Create and push a branch with safe automated fixes"
-        required: true
-        default: true
-        type: boolean
-      create_pull_request:
-        description: "Open a pull request when a fix branch is pushed"
-        required: true
-        default: true
-        type: boolean
-      draft_pull_request:
-        description: "Create the automated pull request as draft so external quality gates can be reviewed first"
-        required: true
-        default: true
-        type: boolean
-      fix_branch_prefix:
-        description: "Prefix for the generated fix branch"
-        required: true
-        default: "auto/api-version"
-        type: string
-      run_deploy_validate:
-        description: "Validate deployment in Salesforce before pushing the fix branch"
-        required: true
-        default: true
-        type: boolean
-      enforce_deploy_validation:
-        description: "Fail the workflow and block the fix branch when Salesforce deploy validation fails"
-        required: true
-        default: true
-        type: boolean
-      test_level:
-        description: "Salesforce deploy validation test level"
-        required: true
-        default: "RunRelevantTests"
-        type: choice
-        options:
-          - RunRelevantTests
-          - RunLocalTests
-          - RunAllTestsInOrg
-      deploy_wait_minutes:
-        description: "Minutes to wait for Salesforce deploy validation"
-        required: true
-        default: "30"
         type: string
 
 permissions:
@@ -73,14 +19,14 @@ env:
   SF_CLI_VERSION: "2.133.4"
   SF_CODE_ANALYZER_VERSION: "5.13.0"
   REPORT_DIR: "docs/api-version-upgrade-guard"
-  INPUT_TARGET_API_VERSION: ${{ inputs.target_api_version }}
-  INPUT_SOURCE_DIR: ${{ inputs.source_dir }}
+  INPUT_TARGET_API_VERSION: "auto"
+  INPUT_SOURCE_DIR: ${{ vars.SF_SOURCE_DIR || 'force-app' }}
   INPUT_TARGET_REF: ${{ inputs.target_ref }}
-  INPUT_TEST_LEVEL: ${{ inputs.test_level }}
-  INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes }}
-  INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix }}
-  INPUT_RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
-  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ inputs.enforce_deploy_validation }}
+  INPUT_TEST_LEVEL: "RunRelevantTests"
+  INPUT_DEPLOY_WAIT_MINUTES: "30"
+  INPUT_FIX_BRANCH_PREFIX: "auto/api-version"
+  INPUT_RUN_DEPLOY_VALIDATE: "true"
+  INPUT_ENFORCE_DEPLOY_VALIDATION: "true"
 
 jobs:
   api-version-upgrade-guard:
@@ -305,7 +251,6 @@ jobs:
 
       - name: Validate deployment in Salesforce
         id: deploy-validation
-        if: ${{ inputs.run_deploy_validate }}
         shell: bash
         working-directory: project
         env:
@@ -380,7 +325,7 @@ jobs:
 
       - name: Push API version fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch && (!inputs.enforce_deploy_validation || !inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        if: ${{ steps.deploy-validation.outputs.deploy_validation_status == 'passed' }}
         shell: bash
         working-directory: project
         env:
@@ -438,7 +383,7 @@ jobs:
         uses: actions/github-script@v8
         env:
           FIX_COMMIT_SHA: ${{ steps.push-fix.outputs.commit_sha }}
-          RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
+          RUN_DEPLOY_VALIDATE: ${{ env.INPUT_RUN_DEPLOY_VALIDATE }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
         with:
           script: |
@@ -488,14 +433,14 @@ jobs:
 
       - name: Open API version fix pull request
         id: fix-pr
-        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' && (!inputs.run_deploy_validate || steps.deploy-validation.outputs.deploy_validation_status == 'passed') }}
+        if: ${{ steps.push-fix.outputs.branch != '' && steps.deploy-validation.outputs.deploy_validation_status == 'passed' }}
         uses: actions/github-script@v8
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           TARGET_REF: ${{ inputs.target_ref }}
           TARGET_API_VERSION: ${{ steps.resolve-api.outputs.target_api_version }}
-          SOURCE_DIR: ${{ inputs.source_dir }}
-          DRAFT_PULL_REQUEST: ${{ inputs.draft_pull_request }}
+          SOURCE_DIR: ${{ env.INPUT_SOURCE_DIR }}
+          DRAFT_PULL_REQUEST: "true"
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
         with:
@@ -773,7 +718,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Fail if enforced deploy validation failed
-        if: ${{ inputs.enforce_deploy_validation && inputs.run_deploy_validate && steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
+        if: ${{ steps.deploy-validation.outputs.deploy_validation_status != 'passed' }}
         shell: bash
         run: |
           echo "Deploy validation failed and enforcement is active. Check deploy-validation.log in the uploaded artifact."

@@ -4,104 +4,25 @@ run-name: "Basic cleanup guard (${{ inputs.cleanup_mode }})"
 on:
   workflow_dispatch:
     inputs:
-      source_dir:
-        description: "Salesforce source directory"
-        required: true
-        default: "force-app"
-        type: string
       target_ref:
-        description: "Branch or ref containing the Salesforce project to test"
+        description: "Branch or ref to clean"
         required: true
         default: "main"
         type: string
       cleanup_mode:
-        description: "safe = whitespace/newline; format = safe plus Prettier; format_lintfix = format plus ESLint and SLDS autofix"
+        description: "Cleanup level: safe, format, or format_lintfix"
         required: true
-        default: "safe"
+        default: "format_lintfix"
         type: choice
         options:
           - safe
           - format
           - format_lintfix
-      create_fix_branch:
-        description: "Create and push a branch with safe automated fixes"
-        required: true
-        default: true
-        type: boolean
-      create_pull_request:
-        description: "Open a pull request when a fix branch is pushed"
-        required: true
-        default: true
-        type: boolean
-      draft_pull_request:
-        description: "Create the automated pull request as draft so external quality gates can be reviewed first"
-        required: true
-        default: true
-        type: boolean
-      fix_branch_prefix:
-        description: "Prefix for the generated fix branch"
-        required: true
-        default: "auto/cleanup"
-        type: string
-      run_deploy_validate:
-        description: "Validate deployment in Salesforce before pushing the fix branch"
-        required: true
-        default: true
-        type: boolean
-      enforce_deploy_validation:
-        description: "Fail the workflow and block the fix branch when Salesforce deploy validation fails"
-        required: true
-        default: true
-        type: boolean
-      test_level:
-        description: "Salesforce deploy validation test level"
-        required: true
-        default: "RunRelevantTests"
-        type: choice
-        options:
-          - RunRelevantTests
-          - RunLocalTests
-          - RunAllTestsInOrg
-      deploy_wait_minutes:
-        description: "Minutes to wait for Salesforce deploy validation"
-        required: true
-        default: "30"
-        type: string
       run_lwc_contract_validation:
-        description: "Deploy baseline and candidate to a dedicated org and compare LWC runtime contracts"
+        description: "Also compare LWC runtime contracts in the validation org"
         required: true
         default: false
         type: boolean
-      enforce_lwc_contract_validation:
-        description: "Block the fix branch when the optional LWC runtime contract differs"
-        required: true
-        default: true
-        type: boolean
-      allow_primary_auth_for_lwc_contract:
-        description: "POC only: allow SF_AUTH_URL when SF_VISUAL_AUTH_URL is unavailable"
-        required: true
-        default: false
-        type: boolean
-      lwc_contract_tolerance_px:
-        description: "Allowed width/height difference in pixels for LWC runtime contracts"
-        required: true
-        default: "1"
-        type: string
-      lwc_contract_wait_ms:
-        description: "Milliseconds to wait for Lightning components to render"
-        required: true
-        default: "8000"
-        type: string
-      tools_repository:
-        description: "Optional repository containing the cleanup guard scripts"
-        required: false
-        default: ""
-        type: string
-      tools_ref:
-        description: "Optional commit SHA or tag for the cleanup guard scripts"
-        required: false
-        default: ""
-        type: string
 
   workflow_call:
     inputs:
@@ -196,18 +117,22 @@ env:
   SLDS_LINTER_VERSION: "1.2.1"
   PLAYWRIGHT_VERSION: "1.60.0"
   REPORT_DIR: "docs/basic-code-cleanup-guard"
-  INPUT_SOURCE_DIR: ${{ inputs.source_dir }}
+  INPUT_SOURCE_DIR: ${{ inputs.source_dir || vars.SF_SOURCE_DIR || 'force-app' }}
   INPUT_TARGET_REF: ${{ inputs.target_ref }}
   INPUT_CLEANUP_MODE: ${{ inputs.cleanup_mode }}
-  INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix }}
-  INPUT_TEST_LEVEL: ${{ inputs.test_level }}
-  INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes }}
-  INPUT_LWC_CONTRACT_TOLERANCE_PX: ${{ inputs.lwc_contract_tolerance_px }}
-  INPUT_LWC_CONTRACT_WAIT_MS: ${{ inputs.lwc_contract_wait_ms }}
-  INPUT_ALLOW_PRIMARY_AUTH_FOR_LWC_CONTRACT: ${{ inputs.allow_primary_auth_for_lwc_contract }}
-  INPUT_RUN_DEPLOY_VALIDATE: ${{ inputs.run_deploy_validate }}
-  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ inputs.enforce_deploy_validation }}
+  INPUT_FIX_BRANCH_PREFIX: ${{ inputs.fix_branch_prefix || 'auto/cleanup' }}
+  INPUT_TEST_LEVEL: ${{ inputs.test_level || 'RunRelevantTests' }}
+  INPUT_DEPLOY_WAIT_MINUTES: ${{ inputs.deploy_wait_minutes || '30' }}
+  INPUT_LWC_CONTRACT_TOLERANCE_PX: ${{ inputs.lwc_contract_tolerance_px || '1' }}
+  INPUT_LWC_CONTRACT_WAIT_MS: ${{ inputs.lwc_contract_wait_ms || '8000' }}
+  INPUT_ALLOW_PRIMARY_AUTH_FOR_LWC_CONTRACT: ${{ github.event_name != 'workflow_dispatch' && inputs.allow_primary_auth_for_lwc_contract }}
+  INPUT_RUN_DEPLOY_VALIDATE: ${{ github.event_name == 'workflow_dispatch' || inputs.run_deploy_validate }}
+  INPUT_ENFORCE_DEPLOY_VALIDATION: ${{ github.event_name == 'workflow_dispatch' || inputs.enforce_deploy_validation }}
   INPUT_RUN_LWC_CONTRACT_VALIDATION: ${{ inputs.run_lwc_contract_validation }}
+  INPUT_ENFORCE_LWC_CONTRACT_VALIDATION: ${{ github.event_name == 'workflow_dispatch' || inputs.enforce_lwc_contract_validation }}
+  INPUT_CREATE_FIX_BRANCH: ${{ github.event_name == 'workflow_dispatch' || inputs.create_fix_branch }}
+  INPUT_CREATE_PULL_REQUEST: ${{ github.event_name == 'workflow_dispatch' || inputs.create_pull_request }}
+  INPUT_DRAFT_PULL_REQUEST: ${{ github.event_name == 'workflow_dispatch' || inputs.draft_pull_request }}
 
 jobs:
   basic-code-cleanup-guard:
@@ -692,7 +617,7 @@ jobs:
 
       - name: Validate deployment in Salesforce
         id: deploy-validation
-        if: ${{ inputs.run_deploy_validate }}
+        if: ${{ env.INPUT_RUN_DEPLOY_VALIDATE == 'true' }}
         shell: bash
         working-directory: project
         env:
@@ -767,7 +692,7 @@ jobs:
 
       - name: Validate LWC runtime contracts
         id: lwc-contract
-        if: ${{ inputs.run_lwc_contract_validation }}
+        if: ${{ env.INPUT_RUN_LWC_CONTRACT_VALIDATION == 'true' }}
         shell: bash
         env:
           SF_VISUAL_AUTH_URL: ${{ secrets.SF_VISUAL_AUTH_URL }}
@@ -984,7 +909,7 @@ jobs:
           ANALYZER_AFTER_EXIT_CODE: ${{ steps.analyzer-after.outputs.exit_code }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
-          INPUT_ENFORCE_LWC_CONTRACT_VALIDATION: ${{ inputs.enforce_lwc_contract_validation }}
+          INPUT_ENFORCE_LWC_CONTRACT_VALIDATION: ${{ env.INPUT_ENFORCE_LWC_CONTRACT_VALIDATION }}
         run: |
           node tools/scripts/nodejs/evaluate-cleanup-trust-gate.mjs \
             --report-dir "project/$REPORT_DIR" \
@@ -1001,7 +926,7 @@ jobs:
 
       - name: Push cleanup fix branch
         id: push-fix
-        if: ${{ inputs.create_fix_branch && steps.trust-gate.outputs.allow_fix_branch == 'true' }}
+        if: ${{ env.INPUT_CREATE_FIX_BRANCH == 'true' && steps.trust-gate.outputs.allow_fix_branch == 'true' }}
         shell: bash
         working-directory: project
         env:
@@ -1122,14 +1047,14 @@ jobs:
 
       - name: Open cleanup fix pull request
         id: fix-pr
-        if: ${{ inputs.create_pull_request && steps.push-fix.outputs.branch != '' }}
+        if: ${{ env.INPUT_CREATE_PULL_REQUEST == 'true' && steps.push-fix.outputs.branch != '' }}
         uses: actions/github-script@v8
         env:
           FIX_BRANCH_NAME: ${{ steps.push-fix.outputs.branch }}
           TARGET_REF: ${{ inputs.target_ref }}
           CLEANUP_MODE: ${{ inputs.cleanup_mode }}
-          SOURCE_DIR: ${{ inputs.source_dir }}
-          DRAFT_PULL_REQUEST: ${{ inputs.draft_pull_request }}
+          SOURCE_DIR: ${{ env.INPUT_SOURCE_DIR }}
+          DRAFT_PULL_REQUEST: ${{ env.INPUT_DRAFT_PULL_REQUEST }}
           DEPLOY_VALIDATION_STATUS: ${{ steps.deploy-validation.outputs.deploy_validation_status }}
           DEPLOY_VALIDATION_EXIT_CODE: ${{ steps.deploy-validation.outputs.deploy_validation_exit_code }}
           LWC_CONTRACT_STATUS: ${{ steps.lwc-contract.outputs.status }}
