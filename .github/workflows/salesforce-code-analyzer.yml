@@ -1,0 +1,704 @@
+name: Salesforce Code Analyzer Report
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - "docs/code-analyzer-report.csv"
+      - "docs/code-analyzer-report.md"
+      - "docs/code-analyzer-pr-comment.md"
+      - "docs/code-analyzer-summary.json"
+      - "docs/code-analyzer-ai.json"
+      - "docs/code-analyzer-ai-summary.md"
+      - "docs/code-analyzer-findings.json"
+      - "docs/cliq-alert-status.json"
+  pull_request:
+    branches:
+      - "main"
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: analyzer-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  SF_CLI_VERSION: "2.133.4"
+  SF_CODE_ANALYZER_VERSION: "5.13.0"
+  FAIL_ON_CRITICAL: "true"
+  SF_METRICS_OBJECT: "GitHub_Workflow_Metric__c"
+  GEMINI_MODEL: "gemini-2.5-flash"
+  GEMINI_MAX_RETRIES: "4"
+  CLIQ_ALERT_THRESHOLD_HIGH: "3"
+  CLIQ_NOTIFY_ALL_RUNS: "false"
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+      ANALYZED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SF_AUTH_URL_METRICS: ${{ secrets.SF_AUTH_URL_METRICS }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CLIQ_BOT_WEBHOOK_URL: ${{ secrets.CLIQ_BOT_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Install Salesforce CLI
+        shell: bash
+        run: npm install --global @salesforce/cli@${SF_CLI_VERSION}
+
+      - name: Install Salesforce Code Analyzer plugin
+        shell: bash
+        run: sf plugins install code-analyzer@${SF_CODE_ANALYZER_VERSION}
+
+      - name: Clean previous analyzer artifacts
+        shell: bash
+        run: |
+          rm -f docs/code-analyzer-report.csv
+          rm -f docs/code-analyzer-report.md
+          rm -f docs/code-analyzer-pr-comment.md
+          rm -f docs/code-analyzer-summary.json
+          rm -f docs/code-analyzer-ai.json
+          rm -f docs/code-analyzer-ai-summary.md
+          rm -f docs/code-analyzer-findings.json
+          rm -f docs/cliq-alert-status.json
+          rm -f authFile.txt sf-org.json sf-token.json response.json
+          rm -f sf-workflow-metric.json sf-workflow-alert.json
+
+      - name: Run Salesforce Code Analyzer
+        id: analyzer
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          sf code-analyzer run \
+            --workspace . \
+            --target force-app \
+            --rule-selector Recommended \
+            --rule-selector CustomPMD \
+            --config-file code-analyzer.yml \
+            --output-file docs/code-analyzer-report.csv \
+            --view table
+          EXIT_CODE=$?
+          echo "exit-code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Generate Markdown summary
+        id: summary
+        shell: pwsh
+        run: |
+          $csvPath = "docs/code-analyzer-report.csv"
+          $mdPath = "docs/code-analyzer-report.md"
+          $prCommentPath = "docs/code-analyzer-pr-comment.md"
+          $summaryJsonPath = "docs/code-analyzer-summary.json"
+          $findingsJsonPath = "docs/code-analyzer-findings.json"
+
+          New-Item -ItemType Directory -Force -Path "docs" | Out-Null
+
+          if (-not (Test-Path $csvPath)) {
+            $summaryObject = [PSCustomObject]@{
+              branch = $env:BRANCH_NAME
+              commit = $env:ANALYZED_SHA
+              totalFindings = 0
+              criticalFindings = 0
+              highFindings = 0
+              topIssues = @()
+            }
+
+            @(
+              "# Salesforce Code Analyzer Summary"
+              ""
+              "No CSV report was generated."
+            ) | Set-Content $mdPath
+
+            @(
+              "## Salesforce Code Analyzer"
+              ""
+              "No CSV report was generated for branch ``$env:BRANCH_NAME``."
+            ) | Set-Content $prCommentPath
+
+            $summaryObject | ConvertTo-Json -Depth 6 | Set-Content $summaryJsonPath
+            @() | ConvertTo-Json | Set-Content $findingsJsonPath
+            "total=0" >> $env:GITHUB_OUTPUT
+            "high=0" >> $env:GITHUB_OUTPUT
+            "critical=0" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $rows = Import-Csv $csvPath
+          $rawTotal = @($rows).Count
+          $criticalCount = 0
+          $highCount = 0
+          $topIssues = New-Object System.Collections.Generic.List[Object]
+          $findings = New-Object System.Collections.Generic.List[Object]
+
+          foreach ($row in $rows) {
+            $severityValue = ""
+            $ruleName = ""
+            $messageValue = ""
+            $locationValue = ""
+            if ($row.PSObject.Properties.Name -contains "Severity") {
+              $severityValue = "$($row.Severity)"
+            } elseif ($row.PSObject.Properties.Name -contains "severity") {
+              $severityValue = "$($row.severity)"
+            }
+            if ($row.PSObject.Properties.Name -contains "Rule") {
+              $ruleName = "$($row.Rule)"
+            } elseif ($row.PSObject.Properties.Name -contains "rule") {
+              $ruleName = "$($row.rule)"
+            }
+            if ($row.PSObject.Properties.Name -contains "Message") {
+              $messageValue = "$($row.Message)"
+            } elseif ($row.PSObject.Properties.Name -contains "message") {
+              $messageValue = "$($row.message)"
+            }
+            if ($row.PSObject.Properties.Name -contains "Location") {
+              $locationValue = "$($row.Location)"
+            } elseif ($row.PSObject.Properties.Name -contains "location") {
+              $locationValue = "$($row.location)"
+            } elseif ($row.PSObject.Properties.Name -contains "File") {
+              $locationValue = "$($row.File)"
+            } elseif ($row.PSObject.Properties.Name -contains "file") {
+              $locationValue = "$($row.file)"
+            }
+
+            $isInfrastructureError = $ruleName -match 'EngineError$'
+            if ($isInfrastructureError) {
+              continue
+            }
+
+            if ($severityValue -match '^\s*1\b|Critical') {
+              $criticalCount++
+            } elseif ($severityValue -match '^\s*2\b|High') {
+              $highCount++
+            }
+
+            if ($topIssues.Count -lt 5) {
+              $topIssues.Add([PSCustomObject]@{
+                severity = $severityValue
+                rule = $ruleName
+                message = $messageValue
+                location = $locationValue
+              })
+            }
+
+            $findings.Add([PSCustomObject]@{
+              severity = $severityValue
+              rule = $ruleName
+              message = $messageValue
+              location = $locationValue
+            })
+          }
+
+          $total = $findings.Count
+
+          $summaryObject = [PSCustomObject]@{
+            branch = $env:BRANCH_NAME
+            commit = $env:ANALYZED_SHA
+            rawFindings = $rawTotal
+            totalFindings = $total
+            criticalFindings = $criticalCount
+            highFindings = $highCount
+            topIssues = $topIssues
+          }
+
+          @(
+            "# Salesforce Code Analyzer Summary"
+            ""
+            "Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') UTC"
+            ""
+            "Branch: $env:BRANCH_NAME"
+            ""
+            "Commit: $env:ANALYZED_SHA"
+            ""
+            "Raw findings: $rawTotal"
+            "Persisted findings: $total"
+            ""
+            "Critical: $criticalCount"
+            "High: $highCount"
+          ) | Set-Content $mdPath
+
+          @(
+            "## Salesforce Code Analyzer"
+            ""
+            "- Branch: ``$env:BRANCH_NAME``"
+            "- Commit: ``$env:ANALYZED_SHA``"
+            "- Raw findings: **$rawTotal**"
+            "- Persisted findings: **$total**"
+            "- Critical: **$criticalCount**"
+            "- High: **$highCount**"
+            ""
+            "Artifacts:"
+            "- ``docs/code-analyzer-report.csv``"
+            "- ``docs/code-analyzer-report.md``"
+            "- ``docs/code-analyzer-summary.json``"
+          ) | Set-Content $prCommentPath
+
+          $summaryObject | ConvertTo-Json -Depth 6 | Set-Content $summaryJsonPath
+          $findings | ConvertTo-Json -Depth 6 | Set-Content $findingsJsonPath
+          "total=$total" >> $env:GITHUB_OUTPUT
+          "high=$highCount" >> $env:GITHUB_OUTPUT
+          "critical=$criticalCount" >> $env:GITHUB_OUTPUT
+
+      - name: Count blocking critical findings
+        id: quality-gate
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.base_ref || '' }}
+          BEFORE_SHA: ${{ github.event.before || '' }}
+        run: |
+          $csvPath = "docs/code-analyzer-report.csv"
+          $blockingCritical = 0
+          $gateScope = "all tracked files"
+
+          if (-not (Test-Path $csvPath)) {
+            "blocking_critical=0" >> $env:GITHUB_OUTPUT
+            "gate_scope=no report" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request" -and -not [string]::IsNullOrWhiteSpace($env:BASE_REF)) {
+            git fetch origin $env:BASE_REF --depth=1
+            $changedFiles = @(git diff --name-only "origin/$env:BASE_REF...HEAD")
+            $gateScope = "files changed by this pull request"
+          } elseif ($env:GITHUB_EVENT_NAME -eq "push" -and $env:BEFORE_SHA -match '^[0-9a-f]{40}$' -and $env:BEFORE_SHA -notmatch '^0{40}$') {
+            $changedFiles = @(git diff --name-only $env:BEFORE_SHA $env:GITHUB_SHA)
+            $gateScope = "files changed by this push"
+          } else {
+            $changedFiles = @(git ls-files)
+          }
+
+          $changedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($changedFile in $changedFiles) {
+            $normalized = "$changedFile" -replace '\\', '/'
+            $normalized = $normalized -replace '^\./', ''
+            [void]$changedSet.Add($normalized)
+          }
+
+          foreach ($row in @(Import-Csv $csvPath)) {
+            $severity = if ($row.PSObject.Properties.Name -contains "Severity") { "$($row.Severity)" } else { "$($row.severity)" }
+            $location = if ($row.PSObject.Properties.Name -contains "Location") { "$($row.Location)" } elseif ($row.PSObject.Properties.Name -contains "File") { "$($row.File)" } else { "$($row.file)" }
+            $file = ($location -replace '\\', '/') -replace ':\d+(:\d+)?$', ''
+            $file = $file -replace '^\./', ''
+
+            if (($severity -match '^\s*1\b|Critical') -and $changedSet.Contains($file)) {
+              $blockingCritical++
+            }
+          }
+
+          Add-Content -Path "docs/code-analyzer-pr-comment.md" -Value ""
+          Add-Content -Path "docs/code-analyzer-pr-comment.md" -Value "Quality gate:"
+          Add-Content -Path "docs/code-analyzer-pr-comment.md" -Value ("- Blocking Critical findings in {0}: **{1}**" -f $gateScope, $blockingCritical)
+
+          "blocking_critical=$blockingCritical" >> $env:GITHUB_OUTPUT
+          "gate_scope=$gateScope" >> $env:GITHUB_OUTPUT
+
+      - name: Generate Gemini insights
+        id: gemini
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          node ./scripts/nodejs/generate-gemini-insights.mjs \
+            --input docs/code-analyzer-summary.json \
+            --output docs/code-analyzer-ai.json \
+            --markdown docs/code-analyzer-ai-summary.md
+
+          AI_SUMMARY=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/code-analyzer-ai.json','utf8'));process.stdout.write(String(d.summary || '').trim())")
+          AI_RISK_LEVEL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/code-analyzer-ai.json','utf8'));process.stdout.write(String(d.riskLevel || '').trim())")
+          AI_BLOCKING=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/code-analyzer-ai.json','utf8'));process.stdout.write(String(Boolean(d.blocking)))")
+          AI_RECOMMENDED_ACTION=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/code-analyzer-ai.json','utf8'));process.stdout.write(String(d.recommendedAction || '').trim())")
+          AI_TOP_ISSUES=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/code-analyzer-ai.json','utf8'));process.stdout.write((d.topIssues || []).join(' | '))")
+
+          {
+            echo "summary<<EOF"
+            printf '%s\n' "$AI_SUMMARY"
+            echo "EOF"
+            echo "risk-level=$AI_RISK_LEVEL"
+            echo "blocking=$AI_BLOCKING"
+            echo "recommended-action<<EOF"
+            printf '%s\n' "$AI_RECOMMENDED_ACTION"
+            echo "EOF"
+            echo "top-issues<<EOF"
+            printf '%s\n' "$AI_TOP_ISSUES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Append Gemini insights to PR summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [ -f docs/code-analyzer-ai-summary.md ] && [ -f docs/code-analyzer-pr-comment.md ]; then
+            printf '\n' >> docs/code-analyzer-pr-comment.md
+            cat docs/code-analyzer-ai-summary.md >> docs/code-analyzer-pr-comment.md
+          fi
+
+      - name: Comment on open pull request
+        uses: actions/github-script@v7
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = process.env.BRANCH_NAME;
+            const commentPath = 'docs/code-analyzer-pr-comment.md';
+
+            if (!fs.existsSync(commentPath)) {
+              core.info('PR comment file not found. Skipping comment.');
+              return;
+            }
+
+            const body = fs.readFileSync(commentPath, 'utf8');
+            let pull;
+
+            if (context.eventName === 'pull_request') {
+              pull = context.payload.pull_request;
+            } else {
+              const pulls = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: 'open',
+                head: `${owner}:${branch}`
+              });
+
+              if (!pulls.length) {
+                core.info(`No open pull request found for ${branch}.`);
+                return;
+              }
+
+              pull = pulls[0];
+            }
+
+            const marker = '<!-- salesforce-code-analyzer-comment -->';
+            const commentBody = `${marker}\n${body}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pull.number
+            });
+
+            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull.number,
+                body: commentBody
+              });
+            }
+
+      - name: Install Salesforce CLI for metrics sync
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        run: sf --version
+
+      - name: Authenticate to Salesforce for metrics sync
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        run: |
+          printf '%s' "$SF_AUTH_URL_METRICS" > authFile.txt
+          sf org login sfdx-url --sfdx-url-file authFile.txt --alias sf-metrics --set-default
+
+      - name: Resolve Salesforce connection info
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        run: |
+          sf org display --target-org sf-metrics --verbose --json > sf-org.json
+          sf org auth show-access-token --target-org sf-metrics --json > sf-token.json
+
+      - name: Upsert workflow metrics to Salesforce
+        id: metricsSync
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        env:
+          TOTAL_FINDINGS: ${{ steps.summary.outputs.total }}
+          HIGH_FINDINGS: ${{ steps.summary.outputs.high }}
+          CRITICAL_FINDINGS: ${{ steps.summary.outputs.critical }}
+          ANALYZER_EXIT_CODE: ${{ steps.analyzer.outputs.exit-code }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          BASE_BRANCH: ${{ github.base_ref || '' }}
+          AI_SUMMARY: ${{ steps.gemini.outputs.summary }}
+          AI_RISK_LEVEL: ${{ steps.gemini.outputs.risk-level }}
+          AI_BLOCKING: ${{ steps.gemini.outputs.blocking }}
+          AI_RECOMMENDED_ACTION: ${{ steps.gemini.outputs.recommended-action }}
+          AI_TOP_ISSUES: ${{ steps.gemini.outputs.top-issues }}
+        run: |
+          INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));process.stdout.write(String(d.result.instanceUrl || '').trim())")
+          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-token.json','utf8'));process.stdout.write(String(d.result.accessToken || '').trim())")
+
+          WORKFLOW_CONCLUSION="success"
+          if [ -n "${ANALYZER_EXIT_CODE}" ] && [ "${ANALYZER_EXIT_CODE}" -gt 0 ]; then
+            WORKFLOW_CONCLUSION="failure"
+          fi
+          if [ "${FAIL_ON_CRITICAL}" = "true" ] && [ "${CRITICAL_FINDINGS:-0}" -gt 0 ]; then
+            WORKFLOW_CONCLUSION="failure"
+          fi
+
+          cat > sf-workflow-metric.json <<EOF
+          {
+            "Name": "${{ github.head_ref || github.ref_name }} / Run ${{ github.run_number }}",
+            "Project__c": "${{ github.event.repository.name }}",
+            "Repository__c": "${{ github.repository }}",
+            "Workflow_Name__c": "${{ github.workflow }}",
+            "Branch__c": "${{ github.head_ref || github.ref_name }}",
+            "Base_Branch__c": "${BASE_BRANCH}",
+            "Run_Number__c": ${{ github.run_number }},
+            "Run_Url__c": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "Commit_SHA__c": "${{ github.sha }}",
+            "Status__c": "running",
+            "Conclusion__c": "${WORKFLOW_CONCLUSION}",
+            "Total_Findings__c": ${TOTAL_FINDINGS:-0},
+            "High_Findings__c": ${HIGH_FINDINGS:-0},
+            "Critical_Findings__c": ${CRITICAL_FINDINGS:-0},
+            "Analyzer_Exit_Code__c": ${ANALYZER_EXIT_CODE:-0},
+            "Triggered_By__c": "${{ github.actor }}",
+            "Event_Name__c": "${{ github.event_name }}",
+            "Pull_Request_Number__c": ${PR_NUMBER:-0},
+            "Created_From_GitHub__c": true,
+            "Ai_Summary__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_SUMMARY || ''))"),
+            "Ai_Risk_Level__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_RISK_LEVEL || ''))"),
+            "Ai_Blocking__c": $(node -e "process.stdout.write(String((process.env.AI_BLOCKING || 'false') === 'true'))"),
+            "Ai_Recommended_Action__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_RECOMMENDED_ACTION || ''))"),
+            "Ai_Top_Issues__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_TOP_ISSUES || ''))"),
+            "Ai_Alert_Sent__c": false,
+            "Ai_Alert_Channel__c": "",
+            "Ai_Model__c": "${GEMINI_MODEL}"
+          }
+          EOF
+
+          HTTP_CODE=$(curl -sS -o response.json -w "%{http_code}" \
+            -X PATCH \
+            "${INSTANCE_URL}/services/data/v66.0/sobjects/${SF_METRICS_OBJECT}/Run_Id__c/${{ github.run_id }}" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @sf-workflow-metric.json)
+
+          echo "Salesforce response code: ${HTTP_CODE}"
+          cat response.json || true
+
+          if [ "${HTTP_CODE}" != "200" ] && [ "${HTTP_CODE}" != "201" ] && [ "${HTTP_CODE}" != "204" ]; then
+            echo "Failed to upsert workflow metrics in Salesforce."
+            exit 1
+          fi
+
+      - name: Upsert analyzer findings to Salesforce
+        id: findingsSync
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        env:
+          FINDINGS_OBJECT: GitHub_Workflow_Finding__c
+        run: |
+          node ./scripts/nodejs/upsert-analyzer-findings.mjs \
+            --input docs/code-analyzer-findings.json \
+            --sf-org sf-org.json \
+            --sf-token sf-token.json
+
+      - name: Send Cliq alert
+        id: cliq
+        if: ${{ always() }}
+        shell: bash
+        env:
+          TOTAL_FINDINGS: ${{ steps.summary.outputs.total }}
+          HIGH_FINDINGS: ${{ steps.summary.outputs.high }}
+          CRITICAL_FINDINGS: ${{ steps.summary.outputs.critical }}
+          AI_BLOCKING: ${{ steps.gemini.outputs.blocking }}
+          AI_RISK_LEVEL: ${{ steps.gemini.outputs.risk-level }}
+        run: |
+          node ./scripts/nodejs/send-cliq-alert.mjs \
+            --summary docs/code-analyzer-summary.json \
+            --insights docs/code-analyzer-ai.json \
+            --output docs/cliq-alert-status.json
+
+          SHOULD_ALERT=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/cliq-alert-status.json','utf8'));process.stdout.write(String(Boolean(d.shouldAlert)))")
+          SENT=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('docs/cliq-alert-status.json','utf8'));process.stdout.write(String(Boolean(d.sent)))")
+
+          echo "should-alert=${SHOULD_ALERT}" >> "$GITHUB_OUTPUT"
+          echo "sent=${SENT}" >> "$GITHUB_OUTPUT"
+
+      - name: Update alert status in Salesforce
+        id: alertStatus
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' && steps.cliq.outputs.sent == 'true' }}
+        shell: bash
+        run: |
+          INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));process.stdout.write(String(d.result.instanceUrl || '').trim())")
+          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-token.json','utf8'));process.stdout.write(String(d.result.accessToken || '').trim())")
+
+          cat > sf-workflow-alert.json <<EOF
+          {
+            "Ai_Alert_Sent__c": true,
+            "Ai_Alert_Channel__c": "Cliq"
+          }
+          EOF
+
+          HTTP_CODE=$(curl -sS -o response.json -w "%{http_code}" \
+            -X PATCH \
+            "${INSTANCE_URL}/services/data/v66.0/sobjects/${SF_METRICS_OBJECT}/Run_Id__c/${{ github.run_id }}" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @sf-workflow-alert.json)
+
+          echo "Salesforce response code: ${HTTP_CODE}"
+          cat response.json || true
+
+      - name: Fail on blocking critical findings
+        if: env.FAIL_ON_CRITICAL == 'true'
+        shell: bash
+        run: |
+          critical="${{ steps.quality-gate.outputs.blocking_critical }}"
+
+          if [ "${critical}" -gt 0 ]; then
+            echo "Blocking merge because Critical findings were detected in the quality-gate scope."
+            echo "Blocking Critical findings: ${critical}"
+            exit 1
+          fi
+
+      - name: Fail if analyzer execution failed
+        if: steps.analyzer.outputs.exit-code != '0'
+        shell: bash
+        run: |
+          echo "Salesforce Code Analyzer failed with exit code ${{ steps.analyzer.outputs.exit-code }}."
+          exit 1
+
+      - name: Finalize workflow metrics in Salesforce
+        if: ${{ always() && env.SF_AUTH_URL_METRICS != '' }}
+        shell: bash
+        env:
+          TOTAL_FINDINGS: ${{ steps.summary.outputs.total }}
+          HIGH_FINDINGS: ${{ steps.summary.outputs.high }}
+          CRITICAL_FINDINGS: ${{ steps.summary.outputs.critical }}
+          BLOCKING_CRITICAL_FINDINGS: ${{ steps.quality-gate.outputs.blocking_critical }}
+          ANALYZER_EXIT_CODE: ${{ steps.analyzer.outputs.exit-code }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          BASE_BRANCH: ${{ github.base_ref || '' }}
+          AI_SUMMARY: ${{ steps.gemini.outputs.summary }}
+          AI_RISK_LEVEL: ${{ steps.gemini.outputs.risk-level }}
+          AI_BLOCKING: ${{ steps.gemini.outputs.blocking }}
+          AI_RECOMMENDED_ACTION: ${{ steps.gemini.outputs.recommended-action }}
+          AI_TOP_ISSUES: ${{ steps.gemini.outputs.top-issues }}
+          METRICS_SYNC_OUTCOME: ${{ steps.metricsSync.outcome || '' }}
+          FINDINGS_SYNC_OUTCOME: ${{ steps.findingsSync.outcome || '' }}
+          CLIQ_STEP_OUTCOME: ${{ steps.cliq.outcome || '' }}
+          CLIQ_SENT: ${{ steps.cliq.outputs.sent || 'false' }}
+        run: |
+          INSTANCE_URL=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));process.stdout.write(String(d.result.instanceUrl || '').trim())")
+          ACCESS_TOKEN=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-token.json','utf8'));process.stdout.write(String(d.result.accessToken || '').trim())")
+
+          FINAL_STATUS="success"
+          FINAL_CONCLUSION="success"
+
+          if [ -n "${ANALYZER_EXIT_CODE}" ] && [ "${ANALYZER_EXIT_CODE}" -gt 0 ]; then
+            FINAL_STATUS="failure"
+            FINAL_CONCLUSION="failure"
+          fi
+
+          if [ "${FAIL_ON_CRITICAL}" = "true" ] && [ "${BLOCKING_CRITICAL_FINDINGS:-0}" -gt 0 ]; then
+            FINAL_STATUS="failure"
+            FINAL_CONCLUSION="failure"
+          fi
+
+          if [ "${METRICS_SYNC_OUTCOME}" = "failure" ] || [ "${FINDINGS_SYNC_OUTCOME}" = "failure" ]; then
+            FINAL_STATUS="failure"
+            FINAL_CONCLUSION="failure"
+          fi
+
+          ALERT_SENT_JSON=false
+          ALERT_CHANNEL=""
+          if [ "${CLIQ_SENT}" = "true" ]; then
+            ALERT_SENT_JSON=true
+            ALERT_CHANNEL="Cliq"
+          fi
+
+          cat > sf-workflow-alert.json <<EOF
+          {
+            "Name": "${{ github.head_ref || github.ref_name }} / Run ${{ github.run_number }}",
+            "Project__c": "${{ github.event.repository.name }}",
+            "Repository__c": "${{ github.repository }}",
+            "Workflow_Name__c": "${{ github.workflow }}",
+            "Branch__c": "${{ github.head_ref || github.ref_name }}",
+            "Base_Branch__c": "${BASE_BRANCH}",
+            "Run_Number__c": ${{ github.run_number }},
+            "Run_Url__c": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "Commit_SHA__c": "${{ github.sha }}",
+            "Status__c": "${FINAL_STATUS}",
+            "Conclusion__c": "${FINAL_CONCLUSION}",
+            "Total_Findings__c": ${TOTAL_FINDINGS:-0},
+            "High_Findings__c": ${HIGH_FINDINGS:-0},
+            "Critical_Findings__c": ${CRITICAL_FINDINGS:-0},
+            "Analyzer_Exit_Code__c": ${ANALYZER_EXIT_CODE:-0},
+            "Triggered_By__c": "${{ github.actor }}",
+            "Event_Name__c": "${{ github.event_name }}",
+            "Pull_Request_Number__c": ${PR_NUMBER:-0},
+            "Created_From_GitHub__c": true,
+            "Ai_Summary__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_SUMMARY || ''))"),
+            "Ai_Risk_Level__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_RISK_LEVEL || ''))"),
+            "Ai_Blocking__c": $(node -e "process.stdout.write(String((process.env.AI_BLOCKING || 'false') === 'true'))"),
+            "Ai_Recommended_Action__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_RECOMMENDED_ACTION || ''))"),
+            "Ai_Top_Issues__c": $(node -e "process.stdout.write(JSON.stringify(process.env.AI_TOP_ISSUES || ''))"),
+            "Ai_Alert_Sent__c": ${ALERT_SENT_JSON},
+            "Ai_Alert_Channel__c": "${ALERT_CHANNEL}",
+            "Ai_Model__c": "${GEMINI_MODEL}"
+          }
+          EOF
+
+          HTTP_CODE=$(curl -sS -o response.json -w "%{http_code}" \
+            -X PATCH \
+            "${INSTANCE_URL}/services/data/v66.0/sobjects/${SF_METRICS_OBJECT}/Run_Id__c/${{ github.run_id }}" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @sf-workflow-alert.json)
+
+          echo "Salesforce response code: ${HTTP_CODE}"
+          cat response.json || true
+
+          if [ "${HTTP_CODE}" != "200" ] && [ "${HTTP_CODE}" != "201" ] && [ "${HTTP_CODE}" != "204" ]; then
+            echo "Failed to finalize workflow metrics in Salesforce."
+            exit 1
+          fi
+
+      - name: Upload analyzer reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: salesforce-code-analyzer-${{ github.head_ref || github.ref_name }}
+          path: |
+            docs/code-analyzer-report.csv
+            docs/code-analyzer-report.md
+            docs/code-analyzer-pr-comment.md
+            docs/code-analyzer-summary.json
+            docs/code-analyzer-findings.json
+            docs/code-analyzer-ai.json
+            docs/code-analyzer-ai-summary.md
+            docs/cliq-alert-status.json
+          if-no-files-found: warn
+
+      - name: Clean sensitive local files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f authFile.txt sf-org.json sf-token.json response.json
+          rm -f sf-workflow-metric.json sf-workflow-alert.json
