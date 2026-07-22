@@ -38,7 +38,7 @@ env:
   GEMINI_MODEL: "gemini-2.5-flash"
   GEMINI_MAX_RETRIES: "4"
   CLIQ_ALERT_THRESHOLD_HIGH: "3"
-  CLIQ_NOTIFY_ALL_RUNS: "false"
+  CLIQ_NOTIFY_ALL_RUNS: "true"
 
 jobs:
   analyze:
