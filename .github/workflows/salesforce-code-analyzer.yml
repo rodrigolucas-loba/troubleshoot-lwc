@@ -429,7 +429,7 @@ jobs:
         shell: bash
         run: |
           sf org display --target-org sf-metrics --verbose --json > sf-org.json
-          sf org auth show-access-token --target-org sf-metrics --json > sf-token.json
+          node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync('sf-org.json','utf8'));const accessToken=String(d.result?.accessToken || '').trim();if(!accessToken){throw new Error('Salesforce access token was not returned by sf org display.')}fs.writeFileSync('sf-token.json',JSON.stringify({result:{accessToken}}))"
 
       - name: Upsert workflow metrics to Salesforce
         id: metricsSync
@@ -680,11 +680,19 @@ jobs:
             exit 1
           fi
 
+      - name: Sanitize artifact name
+        id: artifact-name
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          SAFE_BRANCH=$(node -e "process.stdout.write(String(process.env.BRANCH_NAME || 'unknown').replace(/[\"<>|:*?\\\\/\r\n]/g, '-'))")
+          echo "safe-branch=${SAFE_BRANCH}" >> "$GITHUB_OUTPUT"
+
       - name: Upload analyzer reports
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: salesforce-code-analyzer-${{ github.head_ref || github.ref_name }}
+          name: salesforce-code-analyzer-${{ steps.artifact-name.outputs.safe-branch }}
           path: |
             docs/code-analyzer-report.csv
             docs/code-analyzer-report.md
